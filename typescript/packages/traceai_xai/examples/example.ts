@@ -52,3 +52,84 @@ async function main() {
   });
 
   console.log("Chat Response:", chatResponse.choices[0]?.message?.content);
+  console.log("\n");
+
+  console.log("=== Streaming Chat Example ===\n");
+
+  // Example 2: Streaming chat completion
+  const stream = await client.chat.completions.create({
+    model: "grok-beta",
+    messages: [
+      { role: "user", content: "Tell me a short joke." },
+    ],
+    max_tokens: 100,
+    stream: true,
+  });
+
+  process.stdout.write("Stream Response: ");
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content;
+    if (content) {
+      process.stdout.write(content);
+    }
+  }
+  console.log("\n");
+
+  console.log("=== Tool Calling Example ===\n");
+
+  // Example 3: Tool calling with Grok
+  const toolResponse = await client.chat.completions.create({
+    model: "grok-beta",
+    messages: [
+      { role: "user", content: "What's the current time in Tokyo?" },
+    ],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "get_current_time",
+          description: "Get the current time in a specific timezone",
+          parameters: {
+            type: "object",
+            properties: {
+              timezone: { type: "string", description: "IANA timezone (e.g., 'Asia/Tokyo')" },
+            },
+            required: ["timezone"],
+          },
+        },
+      },
+    ],
+    tool_choice: "auto",
+  });
+
+  const toolCall = toolResponse.choices[0]?.message?.tool_calls?.[0];
+  if (toolCall) {
+    console.log("Tool called:", toolCall.function.name);
+    console.log("Arguments:", toolCall.function.arguments);
+  } else {
+    console.log("Response:", toolResponse.choices[0]?.message?.content);
+  }
+  console.log("\n");
+
+  console.log("=== Embeddings Example ===\n");
+
+  // Example 4: Embeddings (if available)
+  try {
+    const embeddingResponse = await client.embeddings.create({
+      model: "grok-embed",
+      input: "Hello, world!",
+    });
+
+    console.log("Embedding dimensions:", embeddingResponse.data[0]?.embedding.length);
+    console.log("First 5 values:", embeddingResponse.data[0]?.embedding.slice(0, 5));
+  } catch (error) {
+    console.log("Embeddings not available with this model/account");
+  }
+  console.log("\n");
+
+  // Shutdown provider
+  await provider.shutdown();
+  console.log("Done! Check the console output above for trace spans.");
+}
+
+main().catch(console.error);
