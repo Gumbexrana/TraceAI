@@ -67,3 +67,108 @@ const stream = await client.chat.completions.create({
 });
 
 for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content || "");
+}
+```
+
+### Tool Calling
+
+```typescript
+const response = await client.chat.completions.create({
+  model: "grok-beta",
+  messages: [
+    { role: "user", content: "What's the current time in Tokyo?" },
+  ],
+  tools: [
+    {
+      type: "function",
+      function: {
+        name: "get_current_time",
+        description: "Get the current time in a specific timezone",
+        parameters: {
+          type: "object",
+          properties: {
+            timezone: {
+              type: "string",
+              description: "IANA timezone (e.g., 'Asia/Tokyo')"
+            },
+          },
+          required: ["timezone"],
+        },
+      },
+    },
+  ],
+  tool_choice: "auto",
+});
+
+// Handle tool calls
+const toolCall = response.choices[0]?.message?.tool_calls?.[0];
+if (toolCall) {
+  console.log(`Tool: ${toolCall.function.name}`);
+  console.log(`Args: ${toolCall.function.arguments}`);
+}
+```
+
+### Embeddings
+
+```typescript
+const embedding = await client.embeddings.create({
+  model: "grok-embed",
+  input: "Hello, world!",
+});
+
+console.log(`Embedding dimensions: ${embedding.data[0].embedding.length}`);
+```
+
+### Multi-Turn Conversations
+
+```typescript
+const response = await client.chat.completions.create({
+  model: "grok-beta",
+  messages: [
+    { role: "system", content: "You are Grok." },
+    { role: "user", content: "My name is Alice." },
+    { role: "assistant", content: "Nice to meet you, Alice!" },
+    { role: "user", content: "What's my name?" },
+  ],
+});
+```
+
+## Configuration Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `instrumentationConfig` | `InstrumentationConfig` | OpenTelemetry instrumentation config |
+| `traceConfig` | `TraceConfigOptions` | TraceAI config (hideInputs, hideOutputs, etc.) |
+
+## Captured Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `fi.span.kind` | "LLM" for chat, "EMBEDDING" for embeddings |
+| `llm.system` | "xai" |
+| `llm.provider` | "xai" |
+| `llm.model` | Model name (grok-beta, etc.) |
+| `llm.token_count.prompt` | Input token count |
+| `llm.token_count.completion` | Output token count |
+| `llm.token_count.total` | Total token count |
+| `llm.input_messages.{n}.role` | Message role |
+| `llm.input_messages.{n}.content` | Message content |
+| `llm.output_messages.{n}.role` | Response role |
+| `llm.output_messages.{n}.content` | Response content |
+| `llm.output_messages.{n}.tool_calls.{m}.*` | Tool call details |
+
+## Available Models
+
+| Model | Description |
+|-------|-------------|
+| `grok-beta` | Grok beta model |
+| `grok-embed` | Embedding model (availability varies) |
+
+## About Grok
+
+Grok is developed by xAI, founded by Elon Musk. It's designed to be witty, helpful, and have real-time knowledge through X (Twitter) integration.
+
+## License
+
+Apache-2.0
