@@ -218,3 +218,98 @@ class TestDataIntegrity:
         cursor.close()
 
 
+class TestTokenAndCostStorage:
+    """Test token counts and cost calculations."""
+
+    @pytest.fixture
+    def db_conn(self):
+        """Get database connection."""
+        conn = get_db_connection()
+        yield conn
+        conn.close()
+
+    def test_token_counts_not_negative(self, db_conn):
+        """Verify token counts are non-negative."""
+        cursor = db_conn.cursor()
+
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM tracer_observationspan
+            WHERE prompt_tokens < 0 OR completion_tokens < 0;
+        """)
+        negative_count = cursor.fetchone()[0]
+        assert negative_count == 0, f"Found {negative_count} spans with negative token counts"
+        cursor.close()
+
+    def test_cost_not_negative(self, db_conn):
+        """Verify costs are non-negative."""
+        cursor = db_conn.cursor()
+
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM tracer_observationspan
+            WHERE cost < 0;
+        """)
+        negative_count = cursor.fetchone()[0]
+        assert negative_count == 0, f"Found {negative_count} spans with negative cost"
+        cursor.close()
+
+    def test_sample_token_data(self, db_conn):
+        """Sample token data from recent spans."""
+        cursor = db_conn.cursor()
+
+        cursor.execute("""
+            SELECT
+                model,
+                AVG(prompt_tokens) as avg_prompt,
+                AVG(completion_tokens) as avg_completion,
+                AVG(cost) as avg_cost
+            FROM tracer_observationspan
+            WHERE model IS NOT NULL
+            GROUP BY model
+            LIMIT 10;
+        """)
+        results = cursor.fetchall()
+
+        for row in results:
+            print(f"Model: {row[0]}, Avg Prompt: {row[1]:.0f}, Avg Completion: {row[2]:.0f}, Avg Cost: ${row[3]:.4f}")
+
+        cursor.close()
+
+
+class TestTimestampStorage:
+    """Test timestamp storage."""
+
+    @pytest.fixture
+    def db_conn(self):
+        """Get database connection."""
+        conn = get_db_connection()
+        yield conn
+        conn.close()
+
+    def test_span_timestamps_valid(self, db_conn):
+        """Verify span timestamps are valid."""
+        cursor = db_conn.cursor()
+
+        # Check for spans where end_time < start_time
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM tracer_observationspan
+            WHERE end_time IS NOT NULL AND end_time < start_time;
+        """)
+        invalid_count = cursor.fetchone()[0]
+        print(f"Spans with invalid timestamps: {invalid_count}")
+        cursor.close()
+
+    def test_recent_data_exists(self, db_conn):
+        """Check if there's recent data."""
+        cursor = db_conn.cursor()
+
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM tracer_trace
+            WHERE start_time > NOW() - INTERVAL '7 days';
+        """)
+        recent_count = cursor.fetchone()[0]
+        print(f"Traces in last 7 days: {recent_count}")
+        cursor.close()
