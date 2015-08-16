@@ -62,3 +62,99 @@ class TestCrewAIExecution:
             expected_output="A single number",
             agent=agent,
         )
+
+        crew = Crew(
+            agents=[agent],
+            tasks=[task],
+            verbose=False,
+        )
+
+        result = crew.kickoff()
+
+        assert result is not None
+        assert "4" in str(result)
+        time.sleep(2)
+        print(f"Crew result: {result}")
+
+    def test_multi_agent_crew(self, setup_crewai):
+        """Test crew with multiple agents."""
+        from crewai import Agent, Task, Crew
+
+        researcher = Agent(
+            role="Researcher",
+            goal="Research topics and provide factual information",
+            backstory="You are a research assistant.",
+            llm=f"openai/{config.google_model}",
+            verbose=False,
+        )
+
+        writer = Agent(
+            role="Writer",
+            goal="Write clear and concise summaries",
+            backstory="You are a technical writer.",
+            llm=f"openai/{config.google_model}",
+            verbose=False,
+        )
+
+        research_task = Task(
+            description="What is the capital of France? Provide just the city name.",
+            expected_output="City name",
+            agent=researcher,
+        )
+
+        write_task = Task(
+            description="Take the research result and write a one-sentence summary about this city.",
+            expected_output="A one-sentence summary",
+            agent=writer,
+        )
+
+        crew = Crew(
+            agents=[researcher, writer],
+            tasks=[research_task, write_task],
+            verbose=False,
+        )
+
+        result = crew.kickoff()
+
+        assert result is not None
+        assert "Paris" in str(result)
+        print(f"Multi-agent result: {result}")
+
+    def test_crew_with_tool(self, setup_crewai):
+        """Test crew with custom tool."""
+        from crewai import Agent, Task, Crew
+        from crewai.tools import BaseTool
+
+        class AddTool(BaseTool):
+            name: str = "add_numbers"
+            description: str = "Add two numbers together. Input: two numbers separated by comma."
+
+            def _run(self, input_str: str) -> str:
+                try:
+                    parts = input_str.split(",")
+                    a, b = int(parts[0].strip()), int(parts[1].strip())
+                    return str(a + b)
+                except Exception:
+                    return "Error: provide two numbers separated by comma"
+
+        agent = Agent(
+            role="Calculator",
+            goal="Use tools to perform calculations",
+            backstory="You are a math assistant that uses tools.",
+            llm=f"openai/{config.google_model}",
+            tools=[AddTool()],
+            verbose=False,
+        )
+
+        task = Task(
+            description="What is 15 + 27? Use the add_numbers tool.",
+            expected_output="The sum of 15 and 27",
+            agent=agent,
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+        result = crew.kickoff()
+
+        assert result is not None
+        assert "42" in str(result)
+        print(f"Tool result: {result}")
