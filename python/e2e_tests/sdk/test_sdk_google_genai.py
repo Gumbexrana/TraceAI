@@ -91,3 +91,143 @@ class TestGoogleGenAIGenerateContent:
 
         contents = [
             types.Content(
+                role="user",
+                parts=[types.Part(text="My name is Alice.")],
+            ),
+            types.Content(
+                role="model",
+                parts=[types.Part(text="Nice to meet you, Alice!")],
+            ),
+            types.Content(
+                role="user",
+                parts=[types.Part(text="What's my name?")],
+            ),
+        ]
+
+        response = genai_client.models.generate_content(
+            model=config.google_model,
+            contents=contents,
+        )
+
+        assert "Alice" in response.text
+
+    def test_streaming(self, genai_client):
+        """Test streaming content generation."""
+        chunks = []
+
+        for chunk in genai_client.models.generate_content_stream(
+            model=config.google_model,
+            contents="Count from 1 to 5.",
+        ):
+            if chunk.text:
+                chunks.append(chunk.text)
+
+        full_response = "".join(chunks)
+        assert len(full_response) > 0
+        print(f"Streamed response: {full_response}")
+
+    def test_with_generation_config(self, genai_client):
+        """Test with explicit generation config."""
+        from google.genai import types
+
+        response = genai_client.models.generate_content(
+            model=config.google_model,
+            contents="What is the capital of France?",
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=20,
+            ),
+        )
+
+        assert response.text is not None
+        assert "Paris" in response.text
+
+
+@skip_if_no_google
+class TestGoogleGenAIToolUse:
+    """Test Google GenAI function calling / tool use."""
+
+    def test_function_calling(self, genai_client):
+        """Test function calling with Google GenAI."""
+        from google.genai import types
+
+        get_weather = types.FunctionDeclaration(
+            name="get_weather",
+            description="Get the current weather for a location",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "location": types.Schema(
+                        type=types.Type.STRING,
+                        description="City name",
+                    ),
+                },
+                required=["location"],
+            ),
+        )
+
+        tool = types.Tool(function_declarations=[get_weather])
+
+        response = genai_client.models.generate_content(
+            model=config.google_model,
+            contents="What's the weather in Paris?",
+            config=types.GenerateContentConfig(
+                tools=[tool],
+            ),
+        )
+
+        # Check if function call was made
+        has_function_call = False
+        for candidate in response.candidates:
+            for part in candidate.content.parts:
+                if part.function_call:
+                    has_function_call = True
+                    assert part.function_call.name == "get_weather"
+                    print(f"Function call: {part.function_call.name}")
+                    print(f"Args: {part.function_call.args}")
+                    break
+
+        if not has_function_call:
+            print("Model chose not to use function (acceptable)")
+
+
+@skip_if_no_google
+class TestGoogleGenAIAsync:
+    """Test async Google GenAI operations."""
+
+    @pytest.mark.asyncio
+    async def test_async_generate(self, async_genai_client):
+        """Test async content generation."""
+        response = await async_genai_client.aio.models.generate_content(
+            model=config.google_model,
+            contents="Say 'async test' briefly.",
+        )
+
+        assert response.text is not None
+
+    @pytest.mark.asyncio
+    async def test_async_streaming(self, async_genai_client):
+        """Test async streaming."""
+        chunks = []
+
+        async for chunk in async_genai_client.aio.models.generate_content_stream(
+            model=config.google_model,
+            contents="Count 1 to 3.",
+        ):
+            if chunk.text:
+                chunks.append(chunk.text)
+
+        assert len(chunks) > 0
+
+
+@skip_if_no_google
+class TestGoogleGenAIErrorHandling:
+    """Test error handling."""
+
+    def test_invalid_model(self, genai_client):
+        """Test handling of invalid model."""
+        with pytest.raises(Exception):
+            genai_client.models.generate_content(
+                model="invalid-model-xyz",
+                contents="test",
+            )
