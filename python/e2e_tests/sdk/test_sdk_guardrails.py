@@ -32,3 +32,56 @@ def setup_guardrails():
         project_type=config.project_type,
         verbose=False,
     )
+
+    GuardrailsInstrumentor().instrument(tracer_provider=tracer_provider)
+
+    yield
+
+    GuardrailsInstrumentor().uninstrument()
+
+
+@skip_if_no_google
+class TestGuardrailsBasic:
+    """Test Guardrails AI basic operations."""
+
+    def test_simple_guard(self, setup_guardrails):
+        """Test simple guard with string validation."""
+        from guardrails import Guard
+
+        guard = Guard()
+
+        result = guard(
+            model="gemini/gemini-2.0-flash",
+            messages=[
+                {"role": "user", "content": "What is 2+2? Answer with just the number."}
+            ],
+            max_tokens=10,
+        )
+
+        assert result.validated_output is not None
+        time.sleep(2)
+        print(f"Guard result: {result.validated_output}")
+
+    def test_guard_with_pydantic(self, setup_guardrails):
+        """Test guard with Pydantic output model."""
+        from pydantic import BaseModel
+        from guardrails import Guard
+
+        class CityInfo(BaseModel):
+            name: str
+            country: str
+
+        guard = Guard.for_pydantic(output_class=CityInfo)
+
+        result = guard(
+            model="gemini/gemini-2.0-flash",
+            messages=[
+                {"role": "user", "content": "Tell me about Paris, the capital of France."}
+            ],
+            max_tokens=100,
+        )
+
+        assert result.validated_output is not None
+        if isinstance(result.validated_output, CityInfo):
+            assert "Paris" in result.validated_output.name
+        print(f"Pydantic guard result: {result.validated_output}")
