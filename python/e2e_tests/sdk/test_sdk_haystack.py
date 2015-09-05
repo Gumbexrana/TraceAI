@@ -62,3 +62,99 @@ class TestHaystackGenerator:
     def test_chat_generation(self, setup_haystack):
         """Test chat generation."""
         from haystack.components.generators.chat import OpenAIChatGenerator
+        from haystack.dataclasses import ChatMessage
+
+        generator = OpenAIChatGenerator(
+            model=config.google_model,
+            api_base_url=config.google_openai_base_url,
+            api_key=config.google_api_key,
+            generation_kwargs={"max_tokens": 50},
+        )
+
+        messages = [
+            ChatMessage.from_system("You are a helpful assistant that responds briefly."),
+            ChatMessage.from_user("What is 2+2?"),
+        ]
+
+        result = generator.run(messages=messages)
+
+        assert "replies" in result
+        assert len(result["replies"]) > 0
+        assert "4" in result["replies"][0].text
+        print(f"Chat response: {result['replies'][0].text}")
+
+
+@skip_if_no_google
+class TestHaystackPipeline:
+    """Test Haystack pipeline with tracing."""
+
+    def test_simple_pipeline(self, setup_haystack):
+        """Test a simple pipeline."""
+        from haystack import Pipeline
+        from haystack.components.generators import OpenAIGenerator
+        from haystack.components.builders import PromptBuilder
+
+        prompt_template = "Answer the question briefly: {{question}}"
+
+        pipeline = Pipeline()
+        pipeline.add_component("prompt_builder", PromptBuilder(template=prompt_template))
+        pipeline.add_component(
+            "llm",
+            OpenAIGenerator(
+                model=config.google_model,
+                api_base_url=config.google_openai_base_url,
+                api_key=config.google_api_key,
+                generation_kwargs={"max_tokens": 50},
+            ),
+        )
+        pipeline.connect("prompt_builder", "llm")
+
+        result = pipeline.run({"prompt_builder": {"question": "What is the capital of France?"}})
+
+        assert "llm" in result
+        assert len(result["llm"]["replies"]) > 0
+        assert "Paris" in result["llm"]["replies"][0]
+        print(f"Pipeline result: {result['llm']['replies'][0]}")
+
+    def test_multi_step_pipeline(self, setup_haystack):
+        """Test multi-step pipeline."""
+        from haystack import Pipeline
+        from haystack.components.generators import OpenAIGenerator
+        from haystack.components.builders import PromptBuilder
+
+        # Step 1: Generate a fact
+        fact_template = "State one interesting fact about: {{topic}}"
+        # Step 2: Summarize
+        summary_template = "Summarize this in exactly one sentence: {{replies[0]}}"
+
+        pipeline = Pipeline()
+        pipeline.add_component("fact_prompt", PromptBuilder(template=fact_template))
+        pipeline.add_component(
+            "fact_llm",
+            OpenAIGenerator(
+                model=config.google_model,
+                api_base_url=config.google_openai_base_url,
+                api_key=config.google_api_key,
+                generation_kwargs={"max_tokens": 100},
+            ),
+        )
+        pipeline.add_component("summary_prompt", PromptBuilder(template=summary_template))
+        pipeline.add_component(
+            "summary_llm",
+            OpenAIGenerator(
+                model=config.google_model,
+                api_base_url=config.google_openai_base_url,
+                api_key=config.google_api_key,
+                generation_kwargs={"max_tokens": 50},
+            ),
+        )
+
+        pipeline.connect("fact_prompt", "fact_llm")
+        pipeline.connect("fact_llm.replies", "summary_prompt.replies")
+        pipeline.connect("summary_prompt", "summary_llm")
+
+        result = pipeline.run({"fact_prompt": {"topic": "the moon"}})
+
+        assert "summary_llm" in result
+        assert len(result["summary_llm"]["replies"]) > 0
+        print(f"Summary: {result['summary_llm']['replies'][0]}")
