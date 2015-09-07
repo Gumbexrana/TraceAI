@@ -72,3 +72,116 @@ class TestInstructorExtraction:
         assert response.age == 30
 
         time.sleep(2)
+        print(f"Extracted: {response}")
+
+    def test_list_extraction(self, instructor_client):
+        """Test extraction of list of items."""
+        from pydantic import BaseModel
+        from typing import List
+
+        class City(BaseModel):
+            name: str
+            country: str
+
+        class CityList(BaseModel):
+            cities: List[City]
+
+        response = instructor_client.chat.completions.create(
+            model=config.google_model,
+            messages=[
+                {"role": "user", "content": "Name 3 European capital cities with their countries."}
+            ],
+            response_model=CityList,
+        )
+
+        assert isinstance(response, CityList)
+        assert len(response.cities) >= 3
+        print(f"Cities: {[c.name for c in response.cities]}")
+
+    def test_nested_extraction(self, instructor_client):
+        """Test nested structured extraction."""
+        from pydantic import BaseModel
+
+        class Address(BaseModel):
+            city: str
+            country: str
+
+        class Person(BaseModel):
+            name: str
+            address: Address
+
+        response = instructor_client.chat.completions.create(
+            model=config.google_model,
+            messages=[
+                {"role": "user", "content": "Alice lives in Paris, France. Extract her name and address."}
+            ],
+            response_model=Person,
+        )
+
+        assert isinstance(response, Person)
+        assert response.name == "Alice"
+        assert "Paris" in response.address.city
+        print(f"Person: {response}")
+
+    def test_enum_extraction(self, instructor_client):
+        """Test extraction with enum field."""
+        from pydantic import BaseModel
+        from enum import Enum
+
+        class Sentiment(str, Enum):
+            POSITIVE = "positive"
+            NEGATIVE = "negative"
+            NEUTRAL = "neutral"
+
+        class SentimentResult(BaseModel):
+            text: str
+            sentiment: Sentiment
+
+        response = instructor_client.chat.completions.create(
+            model=config.google_model,
+            messages=[
+                {"role": "user", "content": "I love this product! It's amazing!"}
+            ],
+            response_model=SentimentResult,
+        )
+
+        assert isinstance(response, SentimentResult)
+        assert response.sentiment == Sentiment.POSITIVE
+        print(f"Sentiment: {response.sentiment}")
+
+
+@skip_if_no_google
+class TestInstructorAsync:
+    """Test async Instructor operations."""
+
+    @pytest.mark.asyncio
+    async def test_async_extraction(self):
+        """Test async structured extraction."""
+        if not config.has_google():
+            pytest.skip("GOOGLE_API_KEY not set")
+
+        from pydantic import BaseModel
+        from openai import AsyncOpenAI
+        import instructor
+
+        async_openai = AsyncOpenAI(
+            base_url=config.google_openai_base_url,
+            api_key=config.google_api_key,
+        )
+
+        client = instructor.from_openai(async_openai)
+
+        class CityInfo(BaseModel):
+            name: str
+            country: str
+
+        response = await client.chat.completions.create(
+            model=config.google_model,
+            messages=[
+                {"role": "user", "content": "What is the capital of Japan?"}
+            ],
+            response_model=CityInfo,
+        )
+
+        assert isinstance(response, CityInfo)
+        assert "Tokyo" in response.name
