@@ -54,3 +54,89 @@ class TestLanceDBOperations:
         import random
 
         data = [
+            {"id": i, "text": f"document {i}", "vector": [random.uniform(-1, 1) for _ in range(128)]}
+            for i in range(10)
+        ]
+
+        table = lancedb_setup.create_table("test_search", data, mode="overwrite")
+
+        results = table.search(data[0]["vector"]).limit(3).to_list()
+
+        assert len(results) == 3
+        assert results[0]["id"] == 0  # Closest to itself
+        time.sleep(2)
+        print(f"Search results: {[r['id'] for r in results]}")
+
+    def test_add_data(self, lancedb_setup):
+        """Test adding data to existing table."""
+        import random
+
+        initial_data = [
+            {"id": i, "text": f"initial {i}", "vector": [random.uniform(-1, 1) for _ in range(128)]}
+            for i in range(5)
+        ]
+
+        table = lancedb_setup.create_table("test_add", initial_data, mode="overwrite")
+
+        new_data = [
+            {"id": i + 5, "text": f"new {i}", "vector": [random.uniform(-1, 1) for _ in range(128)]}
+            for i in range(3)
+        ]
+
+        table.add(new_data)
+
+        assert len(table) == 8
+
+    def test_delete(self, lancedb_setup):
+        """Test deleting records."""
+        import random
+
+        data = [
+            {"id": i, "text": f"doc {i}", "vector": [random.uniform(-1, 1) for _ in range(128)]}
+            for i in range(5)
+        ]
+
+        table = lancedb_setup.create_table("test_delete", data, mode="overwrite")
+        initial_count = len(table)
+
+        table.delete("id = 2")
+
+        assert len(table) == initial_count - 1
+
+    def test_list_tables(self, lancedb_setup):
+        """Test listing tables."""
+        import random
+
+        data = [
+            {"id": 0, "text": "test", "vector": [random.uniform(-1, 1) for _ in range(128)]}
+        ]
+        lancedb_setup.create_table("list_test_table", data, mode="overwrite")
+
+        tables = lancedb_setup.table_names()
+        assert "list_test_table" in tables
+
+    def test_search_with_filter(self, lancedb_setup):
+        """Test search with filter."""
+        import random
+
+        data = [
+            {
+                "id": i,
+                "text": f"doc {i}",
+                "category": "A" if i < 5 else "B",
+                "vector": [random.uniform(-1, 1) for _ in range(128)],
+            }
+            for i in range(10)
+        ]
+
+        table = lancedb_setup.create_table("test_filter", data, mode="overwrite")
+
+        results = (
+            table.search(data[0]["vector"])
+            .where("category = 'A'")
+            .limit(3)
+            .to_list()
+        )
+
+        assert len(results) <= 3
+        assert all(r["category"] == "A" for r in results)
