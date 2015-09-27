@@ -54,3 +54,89 @@ class TestMistralChatCompletion:
             max_tokens=50,
         )
 
+        assert response.choices[0].message.content is not None
+        assert response.usage.prompt_tokens > 0
+        assert response.usage.completion_tokens > 0
+
+        time.sleep(2)
+        print(f"Response: {response.choices[0].message.content}")
+
+    def test_streaming(self, mistral_client):
+        """Test streaming chat completion."""
+        stream = mistral_client.chat.stream(
+            model="mistral-small-latest",
+            messages=[
+                {"role": "user", "content": "Count from 1 to 5."}
+            ],
+            max_tokens=50,
+        )
+
+        chunks = []
+        for event in stream:
+            if event.data.choices[0].delta.content:
+                chunks.append(event.data.choices[0].delta.content)
+
+        full_response = "".join(chunks)
+        assert len(full_response) > 0
+        print(f"Streamed response: {full_response}")
+
+    def test_system_message(self, mistral_client):
+        """Test with system + user messages."""
+        response = mistral_client.chat.complete(
+            model="mistral-small-latest",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that responds briefly."},
+                {"role": "user", "content": "What is 2+2?"},
+            ],
+            max_tokens=20,
+        )
+
+        assert response.choices[0].message.content is not None
+        assert "4" in response.choices[0].message.content
+
+    def test_tool_calling(self, mistral_client):
+        """Test function/tool calling."""
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get weather for a location",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {"type": "string", "description": "City name"}
+                        },
+                        "required": ["location"],
+                    },
+                },
+            }
+        ]
+
+        response = mistral_client.chat.complete(
+            model="mistral-small-latest",
+            messages=[
+                {"role": "user", "content": "What's the weather in Paris?"}
+            ],
+            tools=tools,
+            tool_choice="auto",
+            max_tokens=100,
+        )
+
+        message = response.choices[0].message
+        if message.tool_calls:
+            assert len(message.tool_calls) > 0
+            print(f"Tool call: {message.tool_calls[0].function.name}")
+
+
+@skip_if_no_mistral
+class TestMistralErrorHandling:
+    """Test error handling."""
+
+    def test_invalid_model(self, mistral_client):
+        """Test handling of invalid model."""
+        with pytest.raises(Exception):
+            mistral_client.chat.complete(
+                model="invalid-model-xyz",
+                messages=[{"role": "user", "content": "test"}],
+            )
