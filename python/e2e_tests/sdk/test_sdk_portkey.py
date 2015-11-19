@@ -34,3 +34,59 @@ def portkey_client():
     from portkey_ai import Portkey
 
     client = Portkey(api_key=config.portkey_api_key)
+
+    yield client
+
+    PortkeyInstrumentor().uninstrument()
+
+
+@skip_if_no_portkey
+class TestPortkeyChatCompletion:
+    """Test Portkey chat completion."""
+
+    def test_basic_chat(self, portkey_client):
+        """Test basic chat completion via Portkey."""
+        response = portkey_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": "Say hello in one word."}
+            ],
+            max_tokens=20,
+        )
+
+        assert response.choices[0].message.content is not None
+        time.sleep(2)
+        print(f"Response: {response.choices[0].message.content}")
+
+    def test_streaming(self, portkey_client):
+        """Test streaming via Portkey."""
+        stream = portkey_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": "Count from 1 to 3."}
+            ],
+            max_tokens=30,
+            stream=True,
+        )
+
+        chunks = []
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                chunks.append(chunk.choices[0].delta.content)
+
+        full_response = "".join(chunks)
+        assert len(full_response) > 0
+        print(f"Streamed: {full_response}")
+
+
+@skip_if_no_portkey
+class TestPortkeyErrorHandling:
+    """Test error handling."""
+
+    def test_invalid_model(self, portkey_client):
+        """Test handling of invalid model."""
+        with pytest.raises(Exception):
+            portkey_client.chat.completions.create(
+                model="invalid-model-xyz",
+                messages=[{"role": "user", "content": "test"}],
+            )
