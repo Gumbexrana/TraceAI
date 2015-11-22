@@ -55,3 +55,89 @@ class TestPydanticAIAgent:
             model,
             system_prompt="You are a helpful assistant. Answer briefly.",
         )
+
+        result = agent.run_sync("What is 2+2?")
+
+        assert result.data is not None
+        assert "4" in str(result.data)
+        time.sleep(2)
+        print(f"Agent result: {result.data}")
+
+    def test_agent_with_structured_output(self, setup_pydantic_ai):
+        """Test agent with structured output."""
+        from pydantic import BaseModel
+        from pydantic_ai import Agent
+        from pydantic_ai.models.openai import OpenAIModel
+
+        class CityInfo(BaseModel):
+            name: str
+            country: str
+
+        model = OpenAIModel(
+            config.google_model,
+            base_url=config.google_openai_base_url,
+            api_key=config.google_api_key,
+        )
+
+        agent = Agent(
+            model,
+            result_type=CityInfo,
+            system_prompt="Extract city information from the user query.",
+        )
+
+        result = agent.run_sync("Tell me about Paris, France")
+
+        assert result.data is not None
+        assert isinstance(result.data, CityInfo)
+        assert "Paris" in result.data.name
+        print(f"Structured output: {result.data}")
+
+    def test_agent_with_tools(self, setup_pydantic_ai):
+        """Test agent with tool use."""
+        from pydantic_ai import Agent, RunContext
+        from pydantic_ai.models.openai import OpenAIModel
+
+        model = OpenAIModel(
+            config.google_model,
+            base_url=config.google_openai_base_url,
+            api_key=config.google_api_key,
+        )
+
+        agent = Agent(
+            model,
+            system_prompt="You are a math assistant. Use tools to compute answers.",
+        )
+
+        @agent.tool_plain
+        def add(a: int, b: int) -> int:
+            """Add two numbers."""
+            return a + b
+
+        result = agent.run_sync("What is 15 + 27?")
+
+        assert result.data is not None
+        assert "42" in str(result.data)
+        print(f"Tool result: {result.data}")
+
+
+@skip_if_no_google
+class TestPydanticAIAsync:
+    """Test async PydanticAI operations."""
+
+    @pytest.mark.asyncio
+    async def test_async_agent(self, setup_pydantic_ai):
+        """Test async agent run."""
+        from pydantic_ai import Agent
+        from pydantic_ai.models.openai import OpenAIModel
+
+        model = OpenAIModel(
+            config.google_model,
+            base_url=config.google_openai_base_url,
+            api_key=config.google_api_key,
+        )
+
+        agent = Agent(model, system_prompt="Answer briefly.")
+
+        result = await agent.run("Say hello in one word.")
+
+        assert result.data is not None
