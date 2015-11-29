@@ -44,3 +44,73 @@ def redis_client():
 
     import redis
 
+    client = redis.from_url(REDIS_URL)
+
+    yield client
+
+    RedisInstrumentor().uninstrument()
+
+
+@skip_if_no_redis
+class TestRedisVectorOperations:
+    """Test Redis vector search operations."""
+
+    def test_create_index_and_search(self, redis_client):
+        """Test creating an index and vector search."""
+        import numpy as np
+        from redis.commands.search.field import VectorField, TextField
+        from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+        from redis.commands.search.query import Query
+
+        index_name = f"idx_{uuid.uuid4().hex[:8]}"
+        prefix = f"doc:{index_name}:"
+
+        # Create index
+        try:
+            redis_client.ft(index_name).create_index(
+                [
+                    TextField("content"),
+                    VectorField(
+                        "embedding",
+                        "FLAT",
+                        {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "COSINE"},
+                    ),
+                ],
+                definition=IndexDefinition(prefix=[prefix], index_type=IndexType.HASH),
+            )
+        except Exception:
+            pass  # Index may already exist
+
+        # Insert vectors
+        import random
+
+        for i in range(5):
+            vec = np.array([random.uniform(-1, 1) for _ in range(128)], dtype=np.float32)
+            redis_client.hset(
+                f"{prefix}{i}",
+                mapping={
+                    "content": f"document {i}",
+                    "embedding": vec.tobytes(),
+                },
+            )
+
+        time.sleep(1)
+
+        # Search
+        query_vec = np.array([random.uniform(-1, 1) for _ in range(128)], dtype=np.float32)
+        q = (
+            Query("*=>[KNN 3 @embedding $vec AS score]")
+            .sort_by("score")
+            .return_fields("content", "score")
+            .dialect(2)
+        )
+
+        results = redis_client.ft(index_name).search(
+            q, query_params={"vec": query_vec.tobytes()}
+        )
+
+        assert results.total > 0
+        print(f"Search results: {results.total} hits")
+
+        # Cleanup
+        redis_client.ft(index_name).dropindex(delete_documents=True)
