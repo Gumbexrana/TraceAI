@@ -30,3 +30,51 @@ def setup_strands():
     )
 
     StrandsInstrumentor().instrument(tracer_provider=tracer_provider)
+
+    yield
+
+    StrandsInstrumentor().uninstrument()
+
+
+@skip_if_no_bedrock
+class TestStrandsAgent:
+    """Test Strands agent operations."""
+
+    def test_simple_agent(self, setup_strands):
+        """Test simple Strands agent."""
+        from strands import Agent
+
+        agent = Agent(
+            model="anthropic.claude-3-haiku-20240307-v1:0",
+            system_prompt="You are a helpful assistant. Answer briefly.",
+            region=config.aws_bedrock_region,
+        )
+
+        response = agent("What is 2+2?")
+
+        assert response is not None
+        assert "4" in str(response)
+        time.sleep(2)
+        print(f"Strands result: {response}")
+
+    def test_agent_with_tool(self, setup_strands):
+        """Test Strands agent with tool."""
+        from strands import Agent, tool
+
+        @tool
+        def get_weather(location: str) -> str:
+            """Get weather for a location."""
+            return f"Sunny and 72F in {location}"
+
+        agent = Agent(
+            model="anthropic.claude-3-haiku-20240307-v1:0",
+            system_prompt="You are a weather assistant. Use tools.",
+            tools=[get_weather],
+            region=config.aws_bedrock_region,
+        )
+
+        response = agent("What's the weather in Paris?")
+
+        assert response is not None
+        assert "Paris" in str(response) or "72" in str(response)
+        print(f"Strands tool result: {response}")
