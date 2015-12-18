@@ -39,3 +39,66 @@ def vllm_client():
         project_type=config.project_type,
         verbose=False,
     )
+
+    VLLMInstrumentor().instrument(tracer_provider=tracer_provider)
+
+    from openai import OpenAI
+
+    client = OpenAI(
+        base_url=f"{VLLM_BASE_URL}/v1",
+        api_key="not-needed",  # vLLM doesn't need auth by default
+    )
+
+    yield client
+
+    VLLMInstrumentor().uninstrument()
+
+
+@skip_if_no_vllm
+class TestVLLMChatCompletion:
+    """Test vLLM chat completion."""
+
+    def test_basic_chat(self, vllm_client):
+        """Test basic chat completion."""
+        response = vllm_client.chat.completions.create(
+            model=VLLM_MODEL,
+            messages=[
+                {"role": "user", "content": "Say hello in one word."}
+            ],
+            max_tokens=20,
+        )
+
+        assert response.choices[0].message.content is not None
+        time.sleep(2)
+        print(f"Response: {response.choices[0].message.content}")
+
+    def test_streaming(self, vllm_client):
+        """Test streaming chat completion."""
+        stream = vllm_client.chat.completions.create(
+            model=VLLM_MODEL,
+            messages=[
+                {"role": "user", "content": "Count from 1 to 5."}
+            ],
+            max_tokens=50,
+            stream=True,
+        )
+
+        chunks = []
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                chunks.append(chunk.choices[0].delta.content)
+
+        full_response = "".join(chunks)
+        assert len(full_response) > 0
+        print(f"Streamed: {full_response}")
+
+    def test_completion(self, vllm_client):
+        """Test text completion (non-chat)."""
+        response = vllm_client.completions.create(
+            model=VLLM_MODEL,
+            prompt="The capital of France is",
+            max_tokens=10,
+        )
+
+        assert response.choices[0].text is not None
+        print(f"Completion: {response.choices[0].text}")
