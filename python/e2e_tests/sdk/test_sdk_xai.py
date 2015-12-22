@@ -74,3 +74,119 @@ class TestXAIChatCompletion:
         )
 
         assert response.choices[0].message.content is not None
+        assert response.usage.prompt_tokens > 0
+        assert response.usage.completion_tokens > 0
+
+        time.sleep(2)
+        print(f"Response: {response.choices[0].message.content}")
+
+    def test_streaming(self, xai_client):
+        """Test streaming chat completion."""
+        stream = xai_client.chat.completions.create(
+            model=config.google_model,
+            messages=[
+                {"role": "user", "content": "Count from 1 to 5."}
+            ],
+            max_tokens=50,
+            stream=True,
+        )
+
+        chunks = []
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                chunks.append(chunk.choices[0].delta.content)
+
+        full_response = "".join(chunks)
+        assert len(full_response) > 0
+        print(f"Streamed response: {full_response}")
+
+    def test_tool_calling(self, xai_client):
+        """Test function/tool calling."""
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get the current weather for a location",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {
+                                "type": "string",
+                                "description": "City name",
+                            }
+                        },
+                        "required": ["location"],
+                    },
+                },
+            }
+        ]
+
+        response = xai_client.chat.completions.create(
+            model=config.google_model,
+            messages=[
+                {"role": "user", "content": "What's the weather in San Francisco?"}
+            ],
+            tools=tools,
+            tool_choice="auto",
+            max_tokens=100,
+        )
+
+        message = response.choices[0].message
+        if message.tool_calls:
+            assert len(message.tool_calls) > 0
+            assert message.tool_calls[0].function.name == "get_weather"
+            print(f"Tool call: {message.tool_calls[0].function.name}")
+
+    def test_system_message(self, xai_client):
+        """Test with system + user messages."""
+        response = xai_client.chat.completions.create(
+            model=config.google_model,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that responds briefly."},
+                {"role": "user", "content": "What is 2+2?"},
+            ],
+            max_tokens=20,
+        )
+
+        assert response.choices[0].message.content is not None
+        assert "4" in response.choices[0].message.content
+
+
+@skip_if_no_google
+class TestXAIAsync:
+    """Test async XAI operations."""
+
+    @pytest.mark.asyncio
+    async def test_async_chat(self, async_xai_client):
+        """Test async chat completion."""
+        response = await async_xai_client.chat.completions.create(
+            model=config.google_model,
+            messages=[
+                {"role": "user", "content": "Say 'async test' in one word."}
+            ],
+            max_tokens=10,
+        )
+
+        assert response.choices[0].message.content is not None
+
+
+@skip_if_no_google
+class TestXAIErrorHandling:
+    """Test error handling and edge cases."""
+
+    def test_invalid_model(self, xai_client):
+        """Test handling of invalid model name."""
+        with pytest.raises(Exception):
+            xai_client.chat.completions.create(
+                model="invalid-model-name-xyz",
+                messages=[{"role": "user", "content": "test"}],
+            )
+
+    def test_empty_messages(self, xai_client):
+        """Test handling of empty messages."""
+        with pytest.raises(Exception):
+            xai_client.chat.completions.create(
+                model=config.google_model,
+                messages=[],
+            )
