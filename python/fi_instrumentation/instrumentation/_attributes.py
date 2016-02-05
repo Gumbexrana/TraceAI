@@ -413,3 +413,181 @@ def get_llm_output_message_attributes(
 ) -> "Mapping[str, AttributeValue]":
     return {
         **dict(_llm_messages_attributes(messages, "output")),
+    }
+
+
+def _llm_messages_attributes(
+    messages: Optional["Sequence[Message]"],
+    message_type: Literal["input", "output"],
+) -> Iterator[Tuple[str, AttributeValue]]:
+    base_key = GEN_AI_INPUT_MESSAGES if message_type == "input" else GEN_AI_OUTPUT_MESSAGES
+    if not isinstance(messages, Sequence):
+        return
+    for message_index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            continue
+        if (role := message.get("role")) is not None:
+            yield f"{base_key}.{message_index}.{MESSAGE_ROLE}", role
+        if (content := message.get("content")) is not None:
+            yield f"{base_key}.{message_index}.{MESSAGE_CONTENT}", content
+        if isinstance(contents := message.get("contents"), Sequence):
+            for content_block_index, content_block in enumerate(contents):
+                if not isinstance(content_block, dict):
+                    continue
+                if (type := content_block.get("type")) is not None:
+                    yield (
+                        f"{base_key}.{message_index}.{MESSAGE_CONTENTS}.{content_block_index}.{MESSAGE_CONTENT_TYPE}",
+                        type,
+                    )
+                    if isinstance(text := content_block.get("text"), str):
+                        yield (
+                            f"{base_key}.{message_index}.{MESSAGE_CONTENTS}.{content_block_index}.{MESSAGE_CONTENT_TEXT}",
+                            text,
+                        )
+                if isinstance(image := content_block.get("image"), dict):
+                    if isinstance(url := image.get("url"), str):
+                        yield (
+                            f"{base_key}.{message_index}.{MESSAGE_CONTENTS}.{content_block_index}.{MESSAGE_CONTENT_IMAGE}.{IMAGE_URL}",
+                            url,
+                        )
+        if isinstance(tool_call_id := message.get("tool_call_id"), str):
+            yield f"{base_key}.{message_index}.{MESSAGE_TOOL_CALL_ID}", tool_call_id
+        if isinstance(tool_calls := message.get("tool_calls"), Sequence):
+            for tool_call_index, tool_call in enumerate(tool_calls):
+                if not isinstance(tool_call, dict):
+                    continue
+                if (tool_call_id := tool_call.get("id")) is not None:
+                    yield (
+                        f"{base_key}.{message_index}.{MESSAGE_TOOL_CALLS}.{tool_call_index}.{TOOL_CALL_ID}",
+                        tool_call_id,
+                    )
+                if (function := tool_call.get("function")) is not None:
+                    if isinstance(function, dict):
+                        if isinstance(function_name := function.get("name"), str):
+                            yield (
+                                f"{base_key}.{message_index}.{MESSAGE_TOOL_CALLS}.{tool_call_index}.{TOOL_CALL_FUNCTION_NAME}",
+                                function_name,
+                            )
+                        if isinstance(function_arguments := function.get("arguments"), str):
+                            yield (
+                                f"{base_key}.{message_index}.{MESSAGE_TOOL_CALLS}.{tool_call_index}.{TOOL_CALL_FUNCTION_ARGUMENTS_JSON}",
+                                function_arguments,
+                            )
+                        elif isinstance(function_arguments, dict):
+                            yield (
+                                f"{base_key}.{message_index}.{MESSAGE_TOOL_CALLS}.{tool_call_index}.{TOOL_CALL_FUNCTION_ARGUMENTS_JSON}",
+                                _json_serialize(function_arguments),
+                            )
+
+
+def get_llm_token_count_attributes(
+    token_count: Optional[TokenCount],
+) -> "Mapping[str, AttributeValue]":
+    attributes: Dict[str, AttributeValue] = {}
+    if isinstance(token_count, dict):
+        if (prompt := token_count.get("prompt")) is not None:
+            attributes[GEN_AI_USAGE_INPUT_TOKENS] = prompt
+        if (completion := token_count.get("completion")) is not None:
+            attributes[GEN_AI_USAGE_OUTPUT_TOKENS] = completion
+        if (total := token_count.get("total")) is not None:
+            attributes[GEN_AI_USAGE_TOTAL_TOKENS] = total
+        if (prompt_details := token_count.get("prompt_details")) is not None:
+            if isinstance(prompt_details, dict):
+                if (cache_write := prompt_details.get("cache_write")) is not None:
+                    attributes[GEN_AI_USAGE_INPUT_TOKENS_CACHE_WRITE] = cache_write
+                if (cache_read := prompt_details.get("cache_read")) is not None:
+                    attributes[GEN_AI_USAGE_INPUT_TOKENS_CACHE_READ] = cache_read
+                if (audio := prompt_details.get("audio")) is not None:
+                    attributes[GEN_AI_USAGE_INPUT_TOKENS_AUDIO] = audio
+    return attributes
+
+
+def get_llm_tool_attributes(
+    tools: Optional["Sequence[Tool]"],
+) -> "Mapping[str, AttributeValue]":
+    attributes: Dict[str, AttributeValue] = {}
+    if not isinstance(tools, Sequence):
+        return {}
+    for tool_index, tool in enumerate(tools):
+        if not isinstance(tool, dict):
+            continue
+        if isinstance(tool_json_schema := tool.get("json_schema"), str):
+            attributes[f"{GEN_AI_TOOL_DEFINITIONS}.{tool_index}.{TOOL_JSON_SCHEMA}"] = tool_json_schema
+        elif isinstance(tool_json_schema, dict):
+            attributes[f"{GEN_AI_TOOL_DEFINITIONS}.{tool_index}.{TOOL_JSON_SCHEMA}"] = _json_serialize(
+                tool_json_schema
+            )
+    return attributes
+
+
+# document attributes
+DOCUMENT_CONTENT = DocumentAttributes.DOCUMENT_CONTENT
+DOCUMENT_ID = DocumentAttributes.DOCUMENT_ID
+DOCUMENT_METADATA = DocumentAttributes.DOCUMENT_METADATA
+DOCUMENT_SCORE = DocumentAttributes.DOCUMENT_SCORE
+
+# embedding attributes
+EMBEDDING_TEXT = EmbeddingAttributes.EMBEDDING_TEXT
+EMBEDDING_VECTOR = EmbeddingAttributes.EMBEDDING_VECTOR
+
+# image attributes
+IMAGE_URL = ImageAttributes.IMAGE_URL
+
+# message attributes
+MESSAGE_CONTENT = MessageAttributes.MESSAGE_CONTENT
+MESSAGE_CONTENTS = MessageAttributes.MESSAGE_CONTENTS
+MESSAGE_ROLE = MessageAttributes.MESSAGE_ROLE
+MESSAGE_TOOL_CALL_ID = MessageAttributes.MESSAGE_TOOL_CALL_ID
+MESSAGE_TOOL_CALLS = MessageAttributes.MESSAGE_TOOL_CALLS
+
+# message content attributes
+MESSAGE_CONTENT_IMAGE = MessageContentAttributes.MESSAGE_CONTENT_IMAGE
+MESSAGE_CONTENT_TEXT = MessageContentAttributes.MESSAGE_CONTENT_TEXT
+MESSAGE_CONTENT_TYPE = MessageContentAttributes.MESSAGE_CONTENT_TYPE
+
+# reranker attributes
+RERANKER_INPUT_DOCUMENTS = RerankerAttributes.RERANKER_INPUT_DOCUMENTS
+RERANKER_MODEL_NAME = RerankerAttributes.RERANKER_MODEL_NAME
+RERANKER_OUTPUT_DOCUMENTS = RerankerAttributes.RERANKER_OUTPUT_DOCUMENTS
+RERANKER_QUERY = RerankerAttributes.RERANKER_QUERY
+RERANKER_TOP_K = RerankerAttributes.RERANKER_TOP_K
+
+# span attributes
+EMBEDDING_EMBEDDINGS = SpanAttributes.EMBEDDING_EMBEDDINGS
+EMBEDDING_MODEL_NAME = SpanAttributes.EMBEDDING_MODEL_NAME
+INPUT_MIME_TYPE = SpanAttributes.INPUT_MIME_TYPE
+INPUT_VALUE = SpanAttributes.INPUT_VALUE
+GEN_AI_INPUT_MESSAGES = SpanAttributes.GEN_AI_INPUT_MESSAGES
+GEN_AI_OUTPUT_MESSAGES = SpanAttributes.GEN_AI_OUTPUT_MESSAGES
+GEN_AI_REQUEST_PARAMETERS = SpanAttributes.GEN_AI_REQUEST_PARAMETERS
+GEN_AI_REQUEST_MODEL = SpanAttributes.GEN_AI_REQUEST_MODEL
+GEN_AI_PROVIDER_NAME = SpanAttributes.GEN_AI_PROVIDER_NAME
+GEN_AI_PROVIDER_NAME = SpanAttributes.GEN_AI_PROVIDER_NAME
+GEN_AI_USAGE_OUTPUT_TOKENS = SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
+GEN_AI_USAGE_INPUT_TOKENS = SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS
+GEN_AI_USAGE_INPUT_TOKENS_AUDIO = SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS_AUDIO
+GEN_AI_USAGE_INPUT_TOKENS_CACHE_READ = SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS_CACHE_READ
+GEN_AI_USAGE_INPUT_TOKENS_CACHE_WRITE = (
+    SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS_CACHE_WRITE
+)
+GEN_AI_USAGE_TOTAL_TOKENS = SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS
+GEN_AI_TOOL_DEFINITIONS = SpanAttributes.GEN_AI_TOOL_DEFINITIONS
+METADATA = SpanAttributes.METADATA
+GEN_AI_SPAN_KIND = SpanAttributes.GEN_AI_SPAN_KIND
+OUTPUT_MIME_TYPE = SpanAttributes.OUTPUT_MIME_TYPE
+OUTPUT_VALUE = SpanAttributes.OUTPUT_VALUE
+RETRIEVAL_DOCUMENTS = SpanAttributes.RETRIEVAL_DOCUMENTS
+GEN_AI_CONVERSATION_ID = SpanAttributes.GEN_AI_CONVERSATION_ID
+TAG_TAGS = SpanAttributes.TAG_TAGS
+GEN_AI_TOOL_DESCRIPTION = SpanAttributes.GEN_AI_TOOL_DESCRIPTION
+GEN_AI_TOOL_NAME = SpanAttributes.GEN_AI_TOOL_NAME
+TOOL_PARAMETERS = SpanAttributes.TOOL_PARAMETERS
+USER_ID = SpanAttributes.USER_ID
+
+# tool attributes
+TOOL_JSON_SCHEMA = ToolAttributes.TOOL_JSON_SCHEMA
+
+# tool call attributes
+TOOL_CALL_FUNCTION_ARGUMENTS_JSON = ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON
+TOOL_CALL_FUNCTION_NAME = ToolCallAttributes.TOOL_CALL_FUNCTION_NAME
+TOOL_CALL_ID = ToolCallAttributes.TOOL_CALL_ID
