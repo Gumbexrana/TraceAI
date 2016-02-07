@@ -127,3 +127,59 @@ class GuardrailProtectWrapper:
             args[1] if len(args) > 1 else None
         )
         action = kwargs.get("action")
+        reason_flag = kwargs.get("reason")
+
+        if not inputs or not protect_rules:
+            logger.debug(
+                "Guardrail protect called without inputs or rules. Skipping tracing."
+            )
+            return wrapped(*args, **kwargs)
+
+        with self._start_as_current_span(
+            span_name="Guardrail.protect",
+            attributes=dict(
+                chain(
+                    get_attributes_from_context(),
+                    [(SpanAttributes.GEN_AI_SPAN_KIND, FiSpanKindValues.GUARDRAIL.value)],
+                    [(GUARDRAIL_TYPE, "protect")],
+                    _get_protect_input(inputs),
+                    _get_protect_rules(protect_rules),
+                    _get_raw_input(kwargs),
+                    ([(GUARDRAIL_ACTION, action)] if action is not None else []),
+                    (
+                        [(GUARDRAIL_REASON_FLAG, reason_flag)]
+                        if reason_flag is not None
+                        else []
+                    ),
+                )
+            ),
+        ) as span:
+            try:
+                result = wrapped(*args, **kwargs)
+
+                span.set_attributes(
+                    dict(
+                        chain(
+                            _get_protect_output(result),
+                            _get_raw_output(result),
+                        )
+                    )
+                )
+
+                if result.get("status") == "passed":
+                    span.set_status(Status(StatusCode.OK))
+                else:
+                    failed_rule = result.get("failed_rule", "unknown")
+                    span.set_status(
+                        Status(
+                            StatusCode.ERROR, f"Guardrail check failed: {failed_rule}"
+                        )
+                    )
+
+                return result
+
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                logger.error(f"Exception during protect call: {e}", exc_info=True)
+                raise
