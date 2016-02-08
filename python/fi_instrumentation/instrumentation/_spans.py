@@ -63,3 +63,31 @@ class FiSpan(wrapt.ObjectProxy):  # type: ignore[misc]
         value: Any,
         *,
         mime_type: Optional[FiMimeType] = None,
+    ) -> None:
+        if GEN_AI_SPAN_KIND not in self._self_important_attributes:
+            raise ValueError("Cannot set output attributes on a non-Fi span")
+        self.set_attributes(get_output_attributes(value, mime_type=mime_type))
+
+    def set_tool(
+        self,
+        *,
+        name: str,
+        description: Optional[str] = None,
+        parameters: Union[str, Dict[str, Any]],
+    ) -> None:
+        if self._self_important_attributes.get(GEN_AI_SPAN_KIND) != TOOL:
+            raise ValueError("Cannot set tool attributes on a non-tool span")
+        self.set_attributes(
+            get_tool_attributes(
+                name=name,
+                description=description,
+                parameters=parameters,
+            )
+        )
+
+
+# span kinds
+TOOL = FiSpanKindValues.TOOL.value
+
+# span attributes
+GEN_AI_SPAN_KIND = SpanAttributes.GEN_AI_SPAN_KIND
