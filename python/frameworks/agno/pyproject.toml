@@ -24,3 +24,44 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Monitoring",
 ]
+keywords = [
+    "traceai",
+    "agno",
+    "agents",
+    "observability",
+    "opentelemetry",
+    "openinference",
+    "tracing",
+    "llm",
+    "ai",
+]
+
+dependencies = [
+    "fi-instrumentation-otel>=0.1.11",
+    "opentelemetry-api>=1.0.0",
+    "opentelemetry-sdk>=1.0.0",
+    "opentelemetry-exporter-otlp>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+agno = [
+    "agno>=2.0.0",
+    "openinference-instrumentation-agno>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/futureagi/traceai"
+Documentation = "https://docs.futureagi.com/traceai"
+Repository = "https://github.com/futureagi/traceai"
+
+[tool.hatch.build.targets.wheel]
+packages = ["traceai_agno"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
