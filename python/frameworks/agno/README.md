@@ -90,3 +90,141 @@ configure_agno_tracing(tracer_provider=provider)
 
 ## Features
 
+### Agent Tracing
+
+Automatically captures:
+- Agent name, type, and configuration
+- Model information (provider, ID, temperature, etc.)
+- Tool count and configuration
+- Memory and knowledge settings
+- Debug mode and markdown settings
+
+### Tool Tracing
+
+Tracks tool executions including:
+- Tool name and description
+- Input parameters
+- Execution results
+
+### Team Tracing
+
+For multi-agent setups:
+- Team name
+- Team member agents
+- Inter-agent communication
+
+### Workflow Tracing
+
+For complex workflows:
+- Workflow name
+- Step execution
+- State transitions
+
+## Span Attributes
+
+The instrumentation adds the following attributes to spans:
+
+### LLM Attributes (OpenTelemetry GenAI Semantic Conventions)
+- `gen_ai.system` - Model provider (openai, anthropic, etc.)
+- `gen_ai.request.model` - Requested model ID
+- `gen_ai.request.temperature` - Temperature setting
+- `gen_ai.request.max_tokens` - Max tokens setting
+- `gen_ai.usage.input_tokens` - Input token count
+- `gen_ai.usage.output_tokens` - Output token count
+
+### Agent Attributes
+- `agent.name` - Agent name
+- `agent.type` - Agent type
+- `agent.description` - Agent description
+- `agent.instructions` - Agent instructions
+
+### Agno-Specific Attributes
+- `agno.agent.id` - Agent ID
+- `agno.tool_count` - Number of tools
+- `agno.team.name` - Team name
+- `agno.team.members` - Team member names
+- `agno.workflow.name` - Workflow name
+- `agno.session.id` - Session ID
+- `agno.user.id` - User ID
+- `agno.debug_mode` - Debug mode status
+- `agno.memory.enabled` - Memory enabled status
+- `agno.knowledge.enabled` - Knowledge enabled status
+
+## Helper Functions
+
+### Extract Agent Attributes
+
+```python
+from traceai_agno import get_agent_attributes
+
+agent = Agent(model=OpenAIChat(id="gpt-4"), name="MyAgent")
+attrs = get_agent_attributes(agent)
+# {'agent.name': 'MyAgent', 'agent.type': 'Agent', ...}
+```
+
+### Extract Tool Attributes
+
+```python
+from traceai_agno import get_tool_attributes
+
+def my_tool(query: str) -> str:
+    """Search for information."""
+    return "result"
+
+attrs = get_tool_attributes(my_tool)
+# {'gen_ai.tool.name': 'my_tool', 'gen_ai.tool.description': 'Search for information.'}
+```
+
+### Extract Team Attributes
+
+```python
+from traceai_agno import get_team_attributes
+
+team = Team(name="ResearchTeam", agents=[agent1, agent2])
+attrs = get_team_attributes(team)
+# {'agno.team.name': 'ResearchTeam', 'agno.team.members': 'Agent1, Agent2'}
+```
+
+### Detect Model Provider
+
+```python
+from traceai_agno import get_model_provider
+
+provider = get_model_provider("gpt-4")  # Returns "openai"
+provider = get_model_provider("claude-3-sonnet")  # Returns "anthropic"
+provider = get_model_provider("ollama/llama3")  # Returns "ollama"
+```
+
+### Create Trace Context
+
+```python
+from traceai_agno import create_trace_context
+
+context = create_trace_context(
+    session_id="session-123",
+    user_id="user-456",
+    tags=["production"],
+    metadata={"environment": "prod"},
+)
+```
+
+## Examples
+
+See the [examples](./examples) directory for complete usage examples:
+
+- `basic_agent.py` - Simple agent with tracing
+- `agent_with_tools.py` - Agent with tool calling
+- `team_example.py` - Multi-agent team coordination
+- `workflow_example.py` - Complex workflow tracing
+
+## Requirements
+
+- Python >= 3.10
+- opentelemetry-api >= 1.0.0
+- opentelemetry-sdk >= 1.0.0
+- opentelemetry-exporter-otlp >= 1.0.0
+- fi-instrumentation >= 0.1.0
+
+## License
+
+Apache-2.0
