@@ -200,3 +200,306 @@ class TestGetAgentAttributes:
 
         assert attrs[SpanAttributes.AGNO_MEMORY_ENABLED] is False
 
+    def test_knowledge_enabled(self, mock_agent):
+        """Test knowledge enabled detection."""
+        attrs = get_agent_attributes(mock_agent)
+
+        assert attrs[SpanAttributes.AGNO_KNOWLEDGE_ENABLED] is False
+
+    def test_agent_with_memory(self):
+        """Test agent with memory enabled."""
+        from tests.conftest import MockAgent
+
+        agent = MockAgent(memory={"type": "summary"})
+        attrs = get_agent_attributes(agent)
+
+        assert attrs[SpanAttributes.AGNO_MEMORY_ENABLED] is True
+
+    def test_agent_with_knowledge(self):
+        """Test agent with knowledge enabled."""
+        from tests.conftest import MockAgent
+
+        agent = MockAgent(knowledge={"type": "vector_db"})
+        attrs = get_agent_attributes(agent)
+
+        assert attrs[SpanAttributes.AGNO_KNOWLEDGE_ENABLED] is True
+
+    def test_anthropic_model(self, mock_agent_with_tools):
+        """Test Anthropic model detection in agent."""
+        attrs = get_agent_attributes(mock_agent_with_tools)
+
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_MODEL] == "claude-3-5-sonnet-20241022"
+        assert attrs[SpanAttributes.GEN_AI_PROVIDER_NAME] == "anthropic"
+
+    def test_agent_without_optional_fields(self):
+        """Test agent with minimal attributes."""
+
+        class MinimalAgent:
+            pass
+
+        agent = MinimalAgent()
+        attrs = get_agent_attributes(agent)
+
+        assert attrs[SpanAttributes.AGENT_TYPE] == "MinimalAgent"
+        assert attrs[SpanAttributes.AGNO_TOOL_COUNT] == 0
+        assert attrs[SpanAttributes.AGNO_MEMORY_ENABLED] is False
+        assert attrs[SpanAttributes.AGNO_KNOWLEDGE_ENABLED] is False
+
+
+class TestGetToolAttributes:
+    """Tests for get_tool_attributes function."""
+
+    def test_basic_tool_attributes(self, mock_tool):
+        """Test basic tool attribute extraction."""
+        attrs = get_tool_attributes(mock_tool)
+
+        assert attrs[SpanAttributes.GEN_AI_TOOL_NAME] == "test_tool"
+        assert attrs[SpanAttributes.GEN_AI_TOOL_DESCRIPTION] == "A test tool"
+
+    def test_tool_with_long_description(self):
+        """Test tool with description that needs truncation."""
+        from tests.conftest import MockTool
+
+        long_description = "A" * 600
+        tool = MockTool(name="long_tool", description=long_description)
+        attrs = get_tool_attributes(tool)
+
+        assert len(attrs[SpanAttributes.GEN_AI_TOOL_DESCRIPTION]) == 500
+        assert attrs[SpanAttributes.GEN_AI_TOOL_DESCRIPTION].endswith("...")
+
+    def test_tool_without_name(self):
+        """Test tool without name attribute."""
+
+        class NamelessTool:
+            description = "Some description"
+
+        tool = NamelessTool()
+        attrs = get_tool_attributes(tool)
+
+        assert SpanAttributes.GEN_AI_TOOL_NAME not in attrs
+        assert attrs[SpanAttributes.GEN_AI_TOOL_DESCRIPTION] == "Some description"
+
+    def test_tool_with_function_name(self):
+        """Test tool using __name__ for name."""
+
+        def my_tool():
+            """Tool description from docstring."""
+            pass
+
+        attrs = get_tool_attributes(my_tool)
+
+        assert attrs[SpanAttributes.GEN_AI_TOOL_NAME] == "my_tool"
+        assert attrs[SpanAttributes.GEN_AI_TOOL_DESCRIPTION] == "Tool description from docstring."
+
+
+class TestGetTeamAttributes:
+    """Tests for get_team_attributes function."""
+
+    def test_basic_team_attributes(self, mock_team):
+        """Test basic team attribute extraction."""
+        attrs = get_team_attributes(mock_team)
+
+        assert attrs[SpanAttributes.AGNO_TEAM_NAME] == "TestTeam"
+        assert attrs[SpanAttributes.AGNO_TEAM_MEMBERS] == "Agent1, Agent2"
+
+    def test_empty_team(self):
+        """Test team with no members."""
+        from tests.conftest import MockTeam
+
+        team = MockTeam(name="EmptyTeam", agents=[])
+        attrs = get_team_attributes(team)
+
+        assert attrs[SpanAttributes.AGNO_TEAM_NAME] == "EmptyTeam"
+        assert SpanAttributes.AGNO_TEAM_MEMBERS not in attrs
+
+    def test_team_without_name(self):
+        """Test team without name attribute."""
+
+        class NamelessTeam:
+            agents = []
+
+        team = NamelessTeam()
+        attrs = get_team_attributes(team)
+
+        assert SpanAttributes.AGNO_TEAM_NAME not in attrs
+
+
+class TestGetWorkflowAttributes:
+    """Tests for get_workflow_attributes function."""
+
+    def test_basic_workflow_attributes(self, mock_workflow):
+        """Test basic workflow attribute extraction."""
+        attrs = get_workflow_attributes(mock_workflow)
+
+        assert attrs[SpanAttributes.AGNO_WORKFLOW_NAME] == "TestWorkflow"
+
+    def test_workflow_without_name(self):
+        """Test workflow without name attribute."""
+
+        class NamelessWorkflow:
+            pass
+
+        workflow = NamelessWorkflow()
+        attrs = get_workflow_attributes(workflow)
+
+        assert SpanAttributes.AGNO_WORKFLOW_NAME not in attrs
+
+    def test_workflow_with_function_name(self):
+        """Test workflow using __name__ for name."""
+
+        def my_workflow():
+            pass
+
+        attrs = get_workflow_attributes(my_workflow)
+
+        assert attrs[SpanAttributes.AGNO_WORKFLOW_NAME] == "my_workflow"
+
+
+class TestGetModelAttributes:
+    """Tests for get_model_attributes function."""
+
+    def test_basic_model_attributes(self, mock_model):
+        """Test basic model attribute extraction."""
+        attrs = get_model_attributes(mock_model)
+
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_MODEL] == "gpt-4"
+        assert attrs[SpanAttributes.GEN_AI_PROVIDER_NAME] == "openai"
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_TEMPERATURE] == 0.7
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS] == 1000
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_TOP_P] == 1.0
+
+    def test_model_with_response_usage(self, mock_model, mock_response):
+        """Test model attributes with response usage."""
+        attrs = get_model_attributes(mock_model, mock_response)
+
+        assert attrs[SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS] == 100
+        assert attrs[SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS] == 50
+        assert attrs[SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS] == 150
+
+    def test_model_without_optional_params(self):
+        """Test model without optional parameters."""
+
+        class MinimalModel:
+            id = "test-model"
+
+        model = MinimalModel()
+        attrs = get_model_attributes(model)
+
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_MODEL] == "test-model"
+        assert SpanAttributes.GEN_AI_REQUEST_TEMPERATURE not in attrs
+        assert SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS not in attrs
+
+    def test_response_with_prompt_tokens(self):
+        """Test response using prompt_tokens instead of input_tokens."""
+
+        class AltUsage:
+            prompt_tokens = 200
+            completion_tokens = 100
+
+        class AltResponse:
+            usage = AltUsage()
+
+        class Model:
+            id = "gpt-4"
+
+        attrs = get_model_attributes(Model(), AltResponse())
+
+        assert attrs[SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS] == 200
+        assert attrs[SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS] == 100
+        assert attrs[SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS] == 300
+
+
+class TestCreateTraceContext:
+    """Tests for create_trace_context function."""
+
+    def test_full_context(self):
+        """Test creating full trace context."""
+        context = create_trace_context(
+            session_id="session-123",
+            user_id="user-456",
+            tags=["production", "test"],
+            metadata={"environment": "prod", "version": "1.0"},
+        )
+
+        assert context[SpanAttributes.AGNO_SESSION_ID] == "session-123"
+        assert context[SpanAttributes.AGNO_USER_ID] == "user-456"
+        assert context["tags"] == ["production", "test"]
+        assert context["environment"] == "prod"
+        assert context["version"] == "1.0"
+
+    def test_partial_context(self):
+        """Test creating partial trace context."""
+        context = create_trace_context(session_id="session-123")
+
+        assert context[SpanAttributes.AGNO_SESSION_ID] == "session-123"
+        assert SpanAttributes.AGNO_USER_ID not in context
+        assert "tags" not in context
+
+    def test_empty_context(self):
+        """Test creating empty trace context."""
+        context = create_trace_context()
+
+        assert context == {}
+
+    def test_only_metadata(self):
+        """Test context with only metadata."""
+        context = create_trace_context(metadata={"key": "value"})
+
+        assert context == {"key": "value"}
+
+
+class TestTruncate:
+    """Tests for _truncate helper function."""
+
+    def test_short_text(self):
+        """Test text shorter than max length."""
+        text = "Short text"
+        result = _truncate(text, 500)
+        assert result == text
+
+    def test_exact_length(self):
+        """Test text exactly at max length."""
+        text = "A" * 500
+        result = _truncate(text, 500)
+        assert result == text
+
+    def test_long_text(self):
+        """Test text longer than max length."""
+        text = "A" * 600
+        result = _truncate(text, 500)
+        assert len(result) == 500
+        assert result.endswith("...")
+
+    def test_custom_max_length(self):
+        """Test with custom max length."""
+        text = "A" * 100
+        result = _truncate(text, 50)
+        assert len(result) == 50
+        assert result.endswith("...")
+
+
+class TestModelProviderPatterns:
+    """Tests for MODEL_PROVIDER_PATTERNS ordering."""
+
+    def test_patterns_are_list_of_tuples(self):
+        """Test that patterns are ordered list of tuples."""
+        assert isinstance(MODEL_PROVIDER_PATTERNS, list)
+        for item in MODEL_PROVIDER_PATTERNS:
+            assert isinstance(item, tuple)
+            assert len(item) == 2
+            provider, patterns = item
+            assert isinstance(provider, str)
+            assert isinstance(patterns, list)
+
+    def test_specific_patterns_before_generic(self):
+        """Test that specific patterns come before generic ones."""
+        # Find positions of specific vs generic providers
+        provider_positions = {
+            provider: idx for idx, (provider, _) in enumerate(MODEL_PROVIDER_PATTERNS)
+        }
+
+        # Mistral should come before bedrock
+        assert provider_positions["mistral"] < provider_positions["bedrock"]
+
+        # Meta should come before bedrock (llama patterns)
+        assert provider_positions["meta"] < provider_positions["bedrock"]
