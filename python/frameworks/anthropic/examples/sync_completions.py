@@ -35,3 +35,20 @@ trace_provider = register(
 
 # Initialize the Anthropic instrumentation
 AnthropicInstrumentor().instrument(tracer_provider=trace_provider)
+
+# Initialize Anthropic client
+client = Anthropic()
+
+prompt = (
+    f"{anthropic.HUMAN_PROMPT}"
+    f" how does a court case get to the Supreme Court?"
+    f" {anthropic.AI_PROMPT}"
+)
+
+resp = client.completions.create(
+    model="claude-2.1",
+    prompt=prompt,
+    max_tokens_to_sample=1000,
+)
+
+print(resp)
