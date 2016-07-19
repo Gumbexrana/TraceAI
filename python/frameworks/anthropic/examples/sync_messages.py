@@ -33,3 +33,19 @@ trace_provider = register(
 )
 
 # Initialize the Anthropic instrumentation
+AnthropicInstrumentor().instrument(tracer_provider=trace_provider)
+
+# Initialize Anthropic client
+client = Anthropic()
+
+response = client.messages.create(
+    max_tokens=1024,
+    messages=[
+        {
+            "role": "user",
+            "content": "Hello!",
+        }
+    ],
+    model="claude-3-opus-20240229",
+)
+print(response)
