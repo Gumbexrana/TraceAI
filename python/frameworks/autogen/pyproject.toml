@@ -9,3 +9,21 @@ packages = [
     { include = "traceai_autogen" },
 ]
 
+[tool.poetry.dependencies]
+python = ">=3.10,<3.14"
+fi-instrumentation-otel = ">=0.1.11"
+autogen-agentchat = ">=0.4.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0.0"
+pytest-asyncio = ">=0.23.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests as integration tests (require autogen and API keys)",
+]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
