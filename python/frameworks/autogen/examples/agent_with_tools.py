@@ -57,3 +57,93 @@ def calculate(
     try:
         # Safe evaluation of math expressions
         allowed_chars = set("0123456789+-*/.(). ")
+        if not all(c in allowed_chars for c in expression):
+            return "Error: Invalid characters in expression"
+
+        result = eval(expression)
+        return f"Result: {expression} = {result}"
+    except Exception as e:
+        return f"Error evaluating expression: {str(e)}"
+
+
+def get_current_time(
+    timezone: Annotated[str, "Timezone name (e.g., 'UTC', 'EST', 'PST')"] = "UTC",
+) -> str:
+    """Get the current time in a specified timezone."""
+    now = datetime.now()
+    # Simplified timezone handling
+    tz_offsets = {"UTC": 0, "EST": -5, "PST": -8, "CET": 1, "JST": 9}
+    offset = tz_offsets.get(timezone.upper(), 0)
+
+    return f"Current time ({timezone}): {now.strftime('%Y-%m-%d %H:%M:%S')} (offset: {offset}h)"
+
+
+def search_database(
+    query: Annotated[str, "Search query"],
+    limit: Annotated[int, "Maximum number of results"] = 5,
+) -> str:
+    """Search a simulated database for information."""
+    # Simulated database results
+    results = [
+        {"id": 1, "title": "Python Programming", "relevance": 0.95},
+        {"id": 2, "title": "Machine Learning Basics", "relevance": 0.87},
+        {"id": 3, "title": "Data Science Guide", "relevance": 0.82},
+    ]
+
+    return json.dumps(
+        {
+            "query": query,
+            "results": results[:limit],
+            "total_found": len(results),
+        },
+        indent=2,
+    )
+
+
+async def main():
+    # Create model client
+    model = OpenAIChatCompletionClient(
+        model="gpt-4o",
+        api_key=os.environ.get("OPENAI_API_KEY"),
+    )
+
+    # Create agent with tools
+    agent = AssistantAgent(
+        name="assistant",
+        model_client=model,
+        tools=[get_weather, calculate, get_current_time, search_database],
+        system_message="""You are a helpful assistant with access to tools.
+        Use the available tools to help answer questions.
+        Always explain what you're doing and why.""",
+    )
+
+    # Test queries that will trigger tool use
+    queries = [
+        "What's the weather like in Tokyo?",
+        "Calculate 15 * 7 + 23",
+        "What time is it in EST?",
+        "Search for information about Python",
+    ]
+
+    for query in queries:
+        print(f"\n{'=' * 50}")
+        print(f"Query: {query}")
+        print("-" * 50)
+
+        response = await agent.on_messages(
+            messages=[TextMessage(content=query, source="user")],
+            cancellation_token=None,
+        )
+
+        print(f"Response: {response.chat_message.content}")
+
+        # Show tool calls if any
+        if hasattr(response, "inner_messages") and response.inner_messages:
+            for msg in response.inner_messages:
+                msg_type = type(msg).__name__
+                if "ToolCall" in msg_type:
+                    print(f"  [Tool called: {getattr(msg, 'name', 'unknown')}]")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
