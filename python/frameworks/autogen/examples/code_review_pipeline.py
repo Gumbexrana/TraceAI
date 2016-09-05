@@ -98,3 +98,155 @@ def check_security(
             }
         )
 
+    # Check for hardcoded secrets
+    if re.search(r'(password|secret|api_key)\s*=\s*["\']', code, re.IGNORECASE):
+        vulnerabilities.append(
+            {
+                "severity": "MEDIUM",
+                "issue": "Potential hardcoded secret",
+                "recommendation": "Use environment variables or secret management",
+            }
+        )
+
+    return json.dumps(
+        {
+            "total_vulnerabilities": len(vulnerabilities),
+            "vulnerabilities": vulnerabilities,
+            "security_score": 100 if not vulnerabilities else max(0, 100 - len(vulnerabilities) * 25),
+        },
+        indent=2,
+    )
+
+
+def calculate_complexity(
+    code: Annotated[str, "Python code to analyze complexity"],
+) -> str:
+    """Calculate code complexity metrics (simplified)."""
+    lines = code.split("\n")
+    non_empty_lines = [l for l in lines if l.strip() and not l.strip().startswith("#")]
+
+    # Count functions
+    functions = len(re.findall(r"^\s*def\s+", code, re.MULTILINE))
+
+    # Count classes
+    classes = len(re.findall(r"^\s*class\s+", code, re.MULTILINE))
+
+    # Count conditionals (rough cyclomatic complexity indicator)
+    conditionals = (
+        len(re.findall(r"\bif\b", code))
+        + len(re.findall(r"\belif\b", code))
+        + len(re.findall(r"\bfor\b", code))
+        + len(re.findall(r"\bwhile\b", code))
+        + len(re.findall(r"\btry\b", code))
+    )
+
+    return json.dumps(
+        {
+            "lines_of_code": len(non_empty_lines),
+            "functions": functions,
+            "classes": classes,
+            "conditionals": conditionals,
+            "estimated_complexity": "low" if conditionals < 5 else "medium" if conditionals < 10 else "high",
+        },
+        indent=2,
+    )
+
+
+async def main():
+    # Create model client
+    model = OpenAIChatCompletionClient(
+        model="gpt-4o",
+        api_key=os.environ.get("OPENAI_API_KEY"),
+    )
+
+    # Code style reviewer
+    style_reviewer = AssistantAgent(
+        name="style_reviewer",
+        model_client=model,
+        tools=[analyze_code_style],
+        system_message="""You are a code style expert.
+        Analyze code for:
+        - PEP 8 compliance
+        - Naming conventions
+        - Code formatting
+        - Documentation quality
+        Use the analyze_code_style tool and provide actionable feedback.""",
+    )
+
+    # Security reviewer
+    security_reviewer = AssistantAgent(
+        name="security_reviewer",
+        model_client=model,
+        tools=[check_security],
+        system_message="""You are a security expert.
+        Analyze code for:
+        - Injection vulnerabilities
+        - Hardcoded secrets
+        - Unsafe operations
+        - Authentication/authorization issues
+        Use the check_security tool and flag any concerns.""",
+    )
+
+    # Architecture reviewer
+    architecture_reviewer = AssistantAgent(
+        name="architecture_reviewer",
+        model_client=model,
+        tools=[calculate_complexity],
+        system_message="""You are a software architect.
+        Analyze code for:
+        - Code complexity
+        - Design patterns
+        - Modularity and maintainability
+        - Scalability concerns
+        Use the calculate_complexity tool and provide improvement suggestions.
+        Say APPROVED when review is complete.""",
+    )
+
+    # Create review team
+    review_team = RoundRobinGroupChat(
+        participants=[style_reviewer, security_reviewer, architecture_reviewer],
+        termination_condition=MaxMessageTermination(max_messages=6)
+        | TextMentionTermination("APPROVED"),
+    )
+
+    # Code to review
+    code_to_review = '''
+def process_user_data(user_id, data):
+    """Process user data from input."""
+    password = "admin123"  # TODO: Remove this
+
+    query = f"SELECT * FROM users WHERE id = {user_id}"
+    result = eval(data.get("expression", "1+1"))
+
+    if result>0:
+        return {"status":"success","data":result}
+    else:
+        return {"status": "error"}
+'''
+
+    print("=" * 70)
+    print("CODE REVIEW PIPELINE")
+    print("=" * 70)
+    print("\nCode to review:")
+    print("-" * 40)
+    print(code_to_review)
+    print("-" * 40)
+
+    result = await review_team.run(
+        task=f"Please review the following Python code:\n\n```python\n{code_to_review}\n```"
+    )
+
+    print("\n--- Review Complete ---")
+    print(f"Total review comments: {len(result.messages)}")
+
+    # Summary by reviewer
+    for msg in result.messages:
+        source = getattr(msg, "source", "unknown")
+        content = getattr(msg, "content", "")
+        if source != "user" and content:
+            print(f"\n[{source}]:")
+            print(content[:500] + "..." if len(content) > 500 else content)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
