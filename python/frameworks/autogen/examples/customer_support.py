@@ -86,3 +86,135 @@ def create_ticket(
 ) -> str:
     """Create a support ticket."""
     ticket_id = f"TKT-{hash(issue) % 10000:04d}"
+    return json.dumps(
+        {
+            "ticket_id": ticket_id,
+            "customer_id": customer_id,
+            "issue": issue,
+            "priority": priority,
+            "status": "created",
+        }
+    )
+
+
+def escalate_ticket(
+    ticket_id: Annotated[str, "Ticket ID to escalate"],
+    reason: Annotated[str, "Reason for escalation"],
+) -> str:
+    """Escalate a ticket to higher tier support."""
+    return json.dumps(
+        {
+            "ticket_id": ticket_id,
+            "escalation_reason": reason,
+            "status": "escalated",
+            "assigned_to": "Tier 2 Support",
+        }
+    )
+
+
+async def main():
+    # Create model client
+    model = OpenAIChatCompletionClient(
+        model="gpt-4o",
+        api_key=os.environ.get("OPENAI_API_KEY"),
+    )
+
+    # Tier 1: First-line support
+    tier1_support = AssistantAgent(
+        name="tier1_support",
+        description="First-line support agent for common issues and basic troubleshooting.",
+        model_client=model,
+        tools=[lookup_customer, search_knowledge_base, create_ticket],
+        system_message="""You are a Tier 1 customer support agent.
+
+        Your responsibilities:
+        1. Greet customers warmly
+        2. Look up customer information
+        3. Search knowledge base for solutions
+        4. Handle common issues (password reset, billing questions)
+        5. Create tickets for tracking
+        6. Escalate complex issues to Tier 2
+
+        Be empathetic and professional. If you can't resolve the issue,
+        clearly explain that you'll escalate to specialized support.""",
+    )
+
+    # Tier 2: Technical support
+    tier2_support = AssistantAgent(
+        name="tier2_support",
+        description="Technical support specialist for complex technical issues.",
+        model_client=model,
+        tools=[lookup_customer, escalate_ticket],
+        system_message="""You are a Tier 2 technical support specialist.
+
+        Your responsibilities:
+        1. Handle complex technical issues
+        2. Perform advanced troubleshooting
+        3. Investigate system-level problems
+        4. Provide detailed technical solutions
+        5. Escalate to engineering if needed
+
+        When you've resolved an issue, say RESOLVED.""",
+    )
+
+    # Customer success manager
+    success_manager = AssistantAgent(
+        name="success_manager",
+        description="Customer success manager for premium customers and retention.",
+        model_client=model,
+        tools=[lookup_customer],
+        system_message="""You are a Customer Success Manager.
+
+        Your responsibilities:
+        1. Handle premium customer concerns
+        2. Ensure customer satisfaction
+        3. Offer retention benefits when appropriate
+        4. Follow up on resolved issues
+
+        Focus on building long-term relationships.
+        When the customer is satisfied, say RESOLVED.""",
+    )
+
+    # Create support team
+    support_team = SelectorGroupChat(
+        participants=[tier1_support, tier2_support, success_manager],
+        model_client=model,
+        termination_condition=MaxMessageTermination(max_messages=10)
+        | TextMentionTermination("RESOLVED"),
+    )
+
+    # Simulate customer support scenarios
+    scenarios = [
+        {
+            "customer_id": "C001",
+            "issue": "I'm a premium customer (C001) and I've been having trouble logging in for the past 2 days. I've already tried resetting my password but it's not working.",
+        },
+        {
+            "customer_id": "C002",
+            "issue": "Hi, I'm customer C002. I was charged twice this month and I'd like a refund.",
+        },
+    ]
+
+    for scenario in scenarios:
+        print(f"\n{'=' * 70}")
+        print(f"Support Ticket: {scenario['issue'][:60]}...")
+        print("=" * 70)
+
+        result = await support_team.run(task=scenario["issue"])
+
+        print(f"\n--- Resolution Summary ---")
+        print(f"Total messages: {len(result.messages)}")
+        print(f"Stop reason: {result.stop_reason}")
+
+        # Analyze agent participation
+        agents_involved = set()
+        for msg in result.messages:
+            source = getattr(msg, "source", None)
+            if source:
+                agents_involved.add(source)
+
+        print(f"Agents involved: {', '.join(agents_involved)}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
