@@ -72,3 +72,114 @@ def search_documents(
     query: Annotated[str, "Search query to find relevant documents"],
     max_results: Annotated[int, "Maximum number of documents to return"] = 3,
 ) -> str:
+    """Search the document store for relevant documents."""
+    # Simple keyword-based search (in production, use embeddings/vector search)
+    query_terms = query.lower().split()
+    results = []
+
+    for doc_id, doc in DOCUMENTS.items():
+        score = 0
+        text = f"{doc['title']} {doc['content']} {' '.join(doc['tags'])}".lower()
+
+        for term in query_terms:
+            if term in text:
+                score += text.count(term)
+
+        if score > 0:
+            results.append(
+                {
+                    "doc_id": doc_id,
+                    "title": doc["title"],
+                    "score": score,
+                    "preview": doc["content"][:150] + "...",
+                }
+            )
+
+    # Sort by score
+    results.sort(key=lambda x: x["score"], reverse=True)
+
+    return json.dumps(
+        {
+            "query": query,
+            "results": results[:max_results],
+            "total_found": len(results),
+        },
+        indent=2,
+    )
+
+
+def get_document(
+    doc_id: Annotated[str, "Document ID to retrieve"],
+) -> str:
+    """Retrieve the full content of a specific document."""
+    if doc_id in DOCUMENTS:
+        doc = DOCUMENTS[doc_id]
+        return json.dumps(
+            {
+                "doc_id": doc_id,
+                "title": doc["title"],
+                "content": doc["content"],
+                "tags": doc["tags"],
+            },
+            indent=2,
+        )
+    else:
+        return json.dumps({"error": f"Document {doc_id} not found"})
+
+
+async def main():
+    # Create model client
+    model = OpenAIChatCompletionClient(
+        model="gpt-4o",
+        api_key=os.environ.get("OPENAI_API_KEY"),
+    )
+
+    # Create RAG agent with retrieval tools
+    rag_agent = AssistantAgent(
+        name="rag_assistant",
+        model_client=model,
+        tools=[search_documents, get_document],
+        system_message="""You are a knowledgeable assistant with access to a document store.
+
+        When answering questions:
+        1. First search for relevant documents using the search_documents tool
+        2. Retrieve full documents using get_document for the most relevant results
+        3. Synthesize information from the documents to answer the question
+        4. Cite which documents you used in your answer
+
+        Always ground your answers in the retrieved documents.""",
+    )
+
+    # Test RAG queries
+    queries = [
+        "What are the best practices for writing Python code?",
+        "How do I optimize database performance?",
+        "What should I consider when designing a REST API?",
+        "Can you explain machine learning basics?",
+    ]
+
+    for query in queries:
+        print(f"\n{'=' * 60}")
+        print(f"Question: {query}")
+        print("-" * 60)
+
+        response = await rag_agent.on_messages(
+            messages=[TextMessage(content=query, source="user")],
+            cancellation_token=None,
+        )
+
+        print(f"\nAnswer:\n{response.chat_message.content}")
+
+        # Show retrieved documents
+        if hasattr(response, "inner_messages") and response.inner_messages:
+            tool_calls = [
+                msg
+                for msg in response.inner_messages
+                if "tool" in type(msg).__name__.lower()
+            ]
+            if tool_calls:
+                print(f"\n[Used {len(tool_calls)} tool calls for retrieval]")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
