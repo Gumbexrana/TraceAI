@@ -169,3 +169,77 @@ class AutoGenAttributes:
     METADATA = "autogen.metadata"
 
 
+# Model provider mapping
+MODEL_PROVIDERS = {
+    "openai": "openai",
+    "gpt-": "openai",
+    "o1-": "openai",
+    "o3-": "openai",
+    "anthropic": "anthropic",
+    "claude-": "anthropic",
+    "gemini": "google",
+    "models/gemini": "google",
+    "groq": "groq",
+    "mistral": "mistral",
+    "deepseek": "deepseek",
+    "cohere": "cohere",
+    "azure": "azure",
+    "ollama": "ollama",
+    "together": "together",
+}
+
+
+def get_model_provider(model_name: str) -> str:
+    """Determine the provider from a model name.
+
+    Args:
+        model_name: Model name or identifier
+
+    Returns:
+        Provider name (e.g., "openai", "anthropic")
+    """
+    if not model_name:
+        return "unknown"
+
+    model_lower = model_name.lower()
+
+    for prefix, provider in MODEL_PROVIDERS.items():
+        if model_lower.startswith(prefix):
+            return provider
+
+    # Check for provider:model format
+    if ":" in model_name:
+        provider = model_name.split(":")[0].lower()
+        return provider
+
+    # Check for provider/model format (Azure style)
+    if "/" in model_name:
+        provider = model_name.split("/")[0].lower()
+        if provider in MODEL_PROVIDERS.values():
+            return provider
+
+    return "unknown"
+
+
+def get_agent_type_name(agent: object) -> str:
+    """Get the type name of an agent.
+
+    Args:
+        agent: Agent instance
+
+    Returns:
+        Agent type name
+    """
+    return type(agent).__name__
+
+
+def get_team_type_name(team: object) -> str:
+    """Get the type name of a team.
+
+    Args:
+        team: Team instance
+
+    Returns:
+        Team type name
+    """
+    return type(team).__name__
