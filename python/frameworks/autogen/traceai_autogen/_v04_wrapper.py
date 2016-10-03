@@ -376,3 +376,166 @@ def wrap_team_run(
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 span.record_exception(e)
                 raise
+
+    return async_wrapper
+
+
+def wrap_tool_execution(
+    tool_func: Callable,
+    tracer: trace_api.Tracer,
+    tool_name: str,
+    tool_description: Optional[str] = None,
+) -> Callable:
+    """Wrap a tool function with tracing.
+
+    Args:
+        tool_func: Original tool function
+        tracer: OpenTelemetry tracer
+        tool_name: Name of the tool
+        tool_description: Optional tool description
+
+    Returns:
+        Wrapped function
+    """
+    import asyncio
+
+    @functools.wraps(tool_func)
+    async def async_wrapper(*args, **kwargs):
+        attributes = {
+            "autogen.span_kind": "tool_call",
+            "autogen.tool.name": tool_name,
+        }
+
+        if tool_description:
+            attributes["autogen.tool.description"] = tool_description[:500]
+
+        # Serialize args
+        if kwargs:
+            attributes["autogen.tool.args"] = safe_serialize(kwargs)
+        elif len(args) > 0:
+            attributes["autogen.tool.args"] = safe_serialize(args)
+
+        start_time = time.time()
+
+        with tracer.start_as_current_span(
+            f"{TOOL_CALL_SPAN_NAME}.{tool_name}",
+            kind=SpanKind.INTERNAL,
+            attributes=attributes,
+        ) as span:
+            try:
+                result = await tool_func(*args, **kwargs)
+
+                duration_ms = (time.time() - start_time) * 1000
+                span.set_attribute("autogen.tool.duration_ms", duration_ms)
+                span.set_attribute("autogen.tool.result", safe_serialize(result))
+                span.set_attribute("autogen.tool.is_error", False)
+                span.set_status(Status(StatusCode.OK))
+
+                return result
+
+            except Exception as e:
+                duration_ms = (time.time() - start_time) * 1000
+                span.set_attribute("autogen.tool.duration_ms", duration_ms)
+                span.set_attribute("autogen.tool.is_error", True)
+                span.set_attribute("autogen.tool.error_message", str(e))
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+    @functools.wraps(tool_func)
+    def sync_wrapper(*args, **kwargs):
+        attributes = {
+            "autogen.span_kind": "tool_call",
+            "autogen.tool.name": tool_name,
+        }
+
+        if tool_description:
+            attributes["autogen.tool.description"] = tool_description[:500]
+
+        start_time = time.time()
+
+        with tracer.start_as_current_span(
+            f"{TOOL_CALL_SPAN_NAME}.{tool_name}",
+            kind=SpanKind.INTERNAL,
+            attributes=attributes,
+        ) as span:
+            try:
+                result = tool_func(*args, **kwargs)
+
+                duration_ms = (time.time() - start_time) * 1000
+                span.set_attribute("autogen.tool.duration_ms", duration_ms)
+                span.set_attribute("autogen.tool.result", safe_serialize(result))
+                span.set_attribute("autogen.tool.is_error", False)
+                span.set_status(Status(StatusCode.OK))
+
+                return result
+
+            except Exception as e:
+                duration_ms = (time.time() - start_time) * 1000
+                span.set_attribute("autogen.tool.duration_ms", duration_ms)
+                span.set_attribute("autogen.tool.is_error", True)
+                span.set_attribute("autogen.tool.error_message", str(e))
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+    # Return appropriate wrapper based on function type
+    if asyncio.iscoroutinefunction(tool_func):
+        return async_wrapper
+    else:
+        return sync_wrapper
+
+
+class TracedTeamRunStream:
+    """Wrapper for team run_stream that tracks completion."""
+
+    def __init__(self, stream, span, start_time, tracer):
+        self._stream = stream
+        self._span = span
+        self._start_time = start_time
+        self._tracer = tracer
+        self._message_count = 0
+        self._last_result = None
+
+    async def __aenter__(self):
+        if hasattr(self._stream, "__aenter__"):
+            self._stream = await self._stream.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        duration_ms = (time.time() - self._start_time) * 1000
+        self._span.set_attribute("autogen.duration_ms", duration_ms)
+        self._span.set_attribute("autogen.stream.message_count", self._message_count)
+
+        if exc_type:
+            self._span.set_attribute("autogen.is_error", True)
+            self._span.set_attribute("autogen.error.message", str(exc_val))
+            self._span.set_status(Status(StatusCode.ERROR, str(exc_val)))
+            if exc_val:
+                self._span.record_exception(exc_val)
+        else:
+            self._span.set_attribute("autogen.is_error", False)
+            self._span.set_status(Status(StatusCode.OK))
+
+            # Record final result
+            if self._last_result:
+                if hasattr(self._last_result, "stop_reason"):
+                    self._span.set_attribute("autogen.task.stop_reason", str(self._last_result.stop_reason))
+
+        self._span.end()
+
+        if hasattr(self._stream, "__aexit__"):
+            await self._stream.__aexit__(exc_type, exc_val, exc_tb)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        item = await self._stream.__anext__()
+        self._message_count += 1
+        self._last_result = item
+        return item
+
+    # Forward other attributes to underlying stream
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
