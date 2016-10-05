@@ -131,3 +131,60 @@ class AutogenInstrumentor(BaseInstrumentor):
     def _uninstrument(self, **kwargs: Any) -> None:
         """Restore original behavior."""
         for agent_class, original_method in self._v04_original_on_messages.items():
+            if hasattr(agent_class, "on_messages"):
+                agent_class.on_messages = original_method
+
+        for team_class, original_method in self._v04_original_team_run.items():
+            if hasattr(team_class, "run"):
+                team_class.run = original_method
+
+        for team_class, original_method in self._v04_original_team_run_stream.items():
+            if hasattr(team_class, "run_stream"):
+                team_class.run_stream = original_method
+
+        self._v04_original_on_messages.clear()
+        self._v04_original_team_run.clear()
+        self._v04_original_team_run_stream.clear()
+        self._v04_instrumented_classes.clear()
+
+
+def instrument_autogen(
+    tracer_provider: Optional[Any] = None,
+    config: Optional[TraceConfig] = None,
+) -> AutogenInstrumentor:
+    """Convenience function to instrument AutoGen v0.4+.
+
+    Args:
+        tracer_provider: Optional OpenTelemetry tracer provider
+        config: Optional trace configuration
+
+    Returns:
+        The instrumentor instance
+
+    Example:
+        >>> from traceai_autogen import instrument_autogen
+        >>> instrumentor = instrument_autogen()
+        >>> from autogen_agentchat.agents import AssistantAgent
+        >>> from autogen_agentchat.teams import RoundRobinGroupChat
+        >>> agent = AssistantAgent("assistant", ...)
+        >>> team = RoundRobinGroupChat([agent], ...)
+        >>> await team.run(task="...")  # Automatically traced
+    """
+    instrumentor = AutogenInstrumentor()
+    kwargs = {}
+    if tracer_provider:
+        kwargs["tracer_provider"] = tracer_provider
+    if config:
+        kwargs["config"] = config
+    instrumentor.instrument(**kwargs)
+    return instrumentor
+
+
+__all__ = [
+    "AutogenInstrumentor",
+    "instrument_autogen",
+    "AutoGenAttributes",
+    "AutoGenSpanKind",
+    "get_model_provider",
+    "wrap_tool_execution",
+]
