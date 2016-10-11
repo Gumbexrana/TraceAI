@@ -13,3 +13,10 @@ packages = [
 python = ">=3.10,<3.14"
 dacite = ">=1.8.1"
 fi-instrumentation-otel = ">=0.1.11"
+botocore = "*"
+boto3 = ">=1.38.17"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
