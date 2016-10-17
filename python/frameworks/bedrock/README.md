@@ -58,3 +58,29 @@ Set up your Bedrock client with built-in observability.
 
 ```python
 def converse_with_claude():
+    system_prompt = [{"text": "You are an expert at creating music playlists"}]
+    messages = [
+        {
+            "role": "user",
+            "content": [{"text": "Hello, how are you?"}, {"text": "What's your name?"}],
+        }
+    ]
+    inference_config = {"maxTokens": 1024, "temperature": 0.0}
+
+    try:
+        response = client.converse(
+            modelId="model_id",
+            system=system_prompt,
+            messages=messages,
+            inferenceConfig=inference_config,
+        )
+        out = response["output"]["message"]
+        messages.append(out)
+        print(out)
+    except Exception as e:
+        print(f"Error: {str(e)}")
+
+if __name__ == "__main__":
+    converse_with_claude()
+```
+
