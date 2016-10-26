@@ -157,3 +157,72 @@ def converse_with_tools():
         {"role": "user", "content": [{"text": "What's the weather like in New York?"}]}
     ]
 
+    try:
+        response = client.converse(
+            modelId=model_id,
+            messages=conversation,
+            inferenceConfig={"maxTokens": 512, "temperature": 0.5, "topP": 0.9},
+            toolConfig=tool_config,
+        )
+
+        tool_calls = []
+        for content_block in response["output"]["message"]["content"]:
+            if content_block.get("type") == "tool_call":
+                tool_calls.append(
+                    {
+                        "name": content_block["tool_call"]["name"],
+                        "arguments": content_block["tool_call"]["arguments"],
+                    }
+                )
+
+        return {
+            "response": response["output"]["message"]["content"][0]["text"],
+            "tool_calls": tool_calls,
+        }
+    except ClientError as e:
+        return {"error": str(e)}
+
+
+def converse_with_image():
+    model_id = os.getenv("AWS_BEDROCK_ANTHROPIC_ARN_ID")
+
+    # Local image path
+    image_path = "/Users/apple/Downloads/image_example.jpeg"
+
+    try:
+        # Read image data from local file
+        with open(image_path, "rb") as image_file:
+            image_bytes = image_file.read()
+
+        conversation = [
+            {
+                "role": "user",
+                "content": [
+                    {"text": "What's in this image?"},
+                    {"text": "What's in this image?"},
+                    {"image": {"format": "jpeg", "source": {"bytes": image_bytes}}},
+                ],
+            }
+        ]
+
+        response = client.converse(
+            modelId=model_id,
+            messages=conversation,
+            inferenceConfig={"maxTokens": 512, "temperature": 0.5, "topP": 0.9},
+        )
+
+        output_content = response["output"]["message"]["content"]
+        # Extract and concatenate all text blocks from the assistant's response
+        assistant_reply = "".join([block.get("text", "") for block in output_content])
+        return assistant_reply
+    except (ClientError, FileNotFoundError) as e:
+        return f"Error: {str(e)}"
+
+
+if __name__ == "__main__":
+
+    print(converse_with_claude())
+    print(invoke_claude_native())
+    print(stream_claude_native())
+    print(converse_with_tools())
+    print(converse_with_image())
