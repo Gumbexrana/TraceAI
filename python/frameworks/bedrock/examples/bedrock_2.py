@@ -112,3 +112,52 @@ def invoke_model_sync(prompt, model_id=model_id):
         "temperature": 0.5,
     }
     request = json.dumps(native_request)
+
+    try:
+        response = client.invoke_model(modelId=model_id, body=request)
+        model_response = json.loads(response["body"].read())
+        response_text = model_response["outputs"][0]["text"]
+        print(response_text)
+        return response_text
+    except (ClientError, Exception) as e:
+        print(f"ERROR: Can't invoke '{model_id}'. Reason: {e}")
+        exit(1)
+
+
+def invoke_model_stream(prompt, model_id=model_id):
+    formatted_prompt = f"<s>[INST] {prompt} [/INST]"
+    native_request = {
+        "prompt": formatted_prompt,
+        "max_tokens": 512,
+        "temperature": 0.5,
+    }
+    # Convert dictionary to JSON string for span attributes
+    request = json.dumps(native_request)
+
+    try:
+        streaming_response = client.invoke_model_with_response_stream(
+            modelId=model_id,
+            body=request,
+            # _llm_invocation_params=json.dumps(native_request),
+            # _input_value=formatted_prompt
+        )
+
+        response_text = ""
+        for event in streaming_response["body"]:
+            chunk = json.loads(event["chunk"]["bytes"])
+            if "outputs" in chunk:
+                text = chunk["outputs"][0].get("text", "")
+                print(text, end="")
+                response_text += text
+        return response_text
+    except (ClientError, Exception) as e:
+        print(f"ERROR: Can't invoke '{model_id}'. Reason: {e}")
+        exit(1)
+
+
+if __name__ == "__main__":
+    test_prompt = "Describe the purpose of a 'hello world' program in one line."
+    converse_with_model(test_prompt)
+    converse_stream_with_model(test_prompt)
+    invoke_model_sync(test_prompt)
+    invoke_model_stream(test_prompt)
