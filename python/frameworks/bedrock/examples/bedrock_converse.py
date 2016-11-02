@@ -58,3 +58,30 @@ def invoke_example():
     )
 
     response_body = json.loads(response.get("body").read())
+    print(response_body["content"][0]["text"])
+
+
+def converse_example():
+    system_prompt = [{"text": "You are an expert at creating music playlists"}]
+    inital_message = {
+        "role": "user",
+        "content": [{"text": "Create a list of 3 pop songs."}],
+    }
+    inference_config = {"maxTokens": 1024, "temperature": 0.0}
+    messages = []
+
+    messages.append(inital_message)
+    response = client.converse(
+        modelId="model_id",
+        system=system_prompt,
+        messages=messages,
+        inferenceConfig=inference_config,
+    )
+    out = response["output"]["message"]
+    messages.append(out)
+    print(out.get("content")[-1].get("text"))
+
+
+if __name__ == "__main__":
+    invoke_example()
+    converse_example()
