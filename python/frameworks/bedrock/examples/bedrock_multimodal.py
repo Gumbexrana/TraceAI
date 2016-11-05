@@ -68,3 +68,33 @@ def multimodal_example():
                     "source": {
                         "bytes": img_bytes,
                     },
+                }
+            },
+        ],
+    }
+
+    response = client.converse(
+        modelId=model_id,
+        messages=[message],
+    )
+
+    out = response["output"]["message"]
+    print(out.get("content")[-1].get("text"))
+
+
+def download_img(url: str) -> Tuple[bytes, str]:
+    format = sanitize_format(os.path.splitext(url)[-1].lstrip("."))
+    resp = requests.get(url)
+    if resp.status_code != 200:
+        raise ValueError(f"Error: Could not retrieve image from URL: {url}")
+    return resp.content, format
+
+
+def sanitize_format(fmt: str) -> str:
+    if fmt == "jpg":
+        return "jpeg"
+    return fmt
+
+
+if __name__ == "__main__":
+    multimodal_example()
