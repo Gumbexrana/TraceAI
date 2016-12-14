@@ -64,3 +64,103 @@ class MessageDeltaUsage:
 class RawContentBlockStopEvent:
     index: int
     type: str = "content_block_stop"
+
+
+@dataclass
+class RawMessageDeltaEvent:
+    delta: Delta
+    usage: MessageDeltaUsage
+    type: str = "message_delta"
+
+
+@dataclass
+class RawMessageStopEvent:
+    type: str = "message_stop"
+
+
+@dataclass
+class TextBlock:
+    text: str
+    citations: Optional[
+        List[Union[CitationCharLocation, CitationPageLocation, CitationContentBlockLocation]]
+    ] = None
+    type: str = "text"
+
+
+@dataclass
+class TextDelta:
+    text: str
+    type: str = "text_delta"
+
+
+@dataclass
+class ToolUseBlock:
+    id: str
+    input: Any
+    name: str
+    type: str = "tool_use"
+
+
+@dataclass
+class Usage:
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: Optional[int] = None
+    cache_read_input_tokens: Optional[int] = None
+
+
+@dataclass
+class Message:
+    id: str
+    content: List[Union[TextBlock, ToolUseBlock]]
+    model: Union[
+        str,
+        Literal[
+            "claude-3-5-haiku-latest",
+            "claude-3-5-haiku-20241022",
+            "claude-3-5-sonnet-latest",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-sonnet-20240620",
+            "claude-3-opus-latest",
+            "claude-3-opus-20240229",
+            "claude-3-sonnet-20240229",
+            "claude-3-haiku-20240307",
+            "claude-2.1",
+            "claude-2.0",
+        ],
+    ]
+    usage: Usage
+    role: str = "assistant"
+    stop_reason: Optional[Literal["end_turn", "max_tokens", "stop_sequence", "tool_use"]] = None
+    stop_sequence: Optional[str] = None
+    type: str = "message"
+
+
+@dataclass
+class RawContentBlockDeltaEvent:
+    delta: Union[TextDelta, InputJSONDelta, CitationsDelta]
+    index: int
+    type: str = "content_block_delta"
+
+
+@dataclass
+class RawContentBlockStartEvent:
+    content_block: Union[TextBlock, ToolUseBlock]
+    index: int
+    type: str = "content_block_start"
+
+
+@dataclass
+class RawMessageStartEvent:
+    message: Message
+    type: str = "message_start"
+
+
+RawMessageStreamEvent = Union[
+    RawMessageStartEvent,
+    RawMessageDeltaEvent,
+    RawMessageStopEvent,
+    RawContentBlockStartEvent,
+    RawContentBlockDeltaEvent,
+    RawContentBlockStopEvent,
+]
