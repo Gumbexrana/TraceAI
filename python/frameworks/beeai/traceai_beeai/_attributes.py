@@ -209,3 +209,94 @@ def get_model_attributes(
     Returns:
         Dictionary of model attributes.
     """
+    attrs = {}
+
+    # Get model name
+    model_name = getattr(model, "model", None) or getattr(model, "model_id", None)
+    if model_name:
+        attrs[SpanAttributes.GEN_AI_REQUEST_MODEL] = model_name
+        attrs[SpanAttributes.GEN_AI_PROVIDER_NAME] = get_model_provider(model_name)
+
+    # Get model parameters
+    if hasattr(model, "temperature"):
+        temp = getattr(model, "temperature", None)
+        if temp is not None:
+            attrs[SpanAttributes.GEN_AI_REQUEST_TEMPERATURE] = temp
+
+    if hasattr(model, "max_tokens"):
+        max_tok = getattr(model, "max_tokens", None)
+        if max_tok is not None:
+            attrs[SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS] = max_tok
+
+    if hasattr(model, "top_p"):
+        top_p = getattr(model, "top_p", None)
+        if top_p is not None:
+            attrs[SpanAttributes.GEN_AI_REQUEST_TOP_P] = top_p
+
+    # Extract usage from response
+    if response:
+        usage = getattr(response, "usage", None)
+        if usage:
+            input_tokens = (
+                getattr(usage, "input_tokens", None) or
+                getattr(usage, "prompt_tokens", None)
+            )
+            output_tokens = (
+                getattr(usage, "output_tokens", None) or
+                getattr(usage, "completion_tokens", None)
+            )
+
+            if input_tokens is not None:
+                attrs[SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
+            if output_tokens is not None:
+                attrs[SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS] = output_tokens
+            if input_tokens is not None and output_tokens is not None:
+                attrs[SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS] = input_tokens + output_tokens
+
+    return attrs
+
+
+def create_trace_context(
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Create a trace context dictionary for BeeAI agents.
+
+    Args:
+        session_id: Optional session identifier.
+        user_id: Optional user identifier.
+        tags: Optional list of tags.
+        metadata: Optional additional metadata.
+
+    Returns:
+        Dictionary of trace context attributes.
+    """
+    context = {}
+
+    if session_id:
+        context[SpanAttributes.BEEAI_SESSION_ID] = session_id
+    if user_id:
+        context[SpanAttributes.BEEAI_USER_ID] = user_id
+    if tags:
+        context["tags"] = tags
+    if metadata:
+        context.update(metadata)
+
+    return context
+
+
+def _truncate(text: str, max_length: int = 500) -> str:
+    """Truncate text to a maximum length.
+
+    Args:
+        text: Text to truncate.
+        max_length: Maximum length.
+
+    Returns:
+        Truncated text with ellipsis if needed.
+    """
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + "..."
