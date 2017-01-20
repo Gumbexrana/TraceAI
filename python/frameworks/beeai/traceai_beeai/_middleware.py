@@ -275,3 +275,122 @@ class TraceAIMiddleware:
 
         self._active_spans[f"llm:{model_name}"] = span
 
+    def on_llm_end(
+        self,
+        model: Any,
+        response: Any,
+    ) -> None:
+        """Called when an LLM call completes.
+
+        Args:
+            model: The LLM/model instance.
+            response: The model's response.
+        """
+        model_name = getattr(model, "model", None) or getattr(model, "model_id", "unknown")
+        span_key = f"llm:{model_name}"
+
+        span = self._active_spans.pop(span_key, None)
+        if span is None:
+            return
+
+        # Extract usage
+        usage = getattr(response, "usage", None)
+        if usage:
+            input_tokens = getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", None)
+            output_tokens = getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", None)
+
+            if input_tokens is not None:
+                span.set_attribute(SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS, input_tokens)
+            if output_tokens is not None:
+                span.set_attribute(SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, output_tokens)
+            if input_tokens and output_tokens:
+                span.set_attribute(SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS, input_tokens + output_tokens)
+
+        if self._capture_output:
+            content = getattr(response, "content", None) or getattr(response, "text", None)
+            if content:
+                span.set_attribute("gen_ai.completion", safe_serialize(content))
+
+        span.set_status(Status(StatusCode.OK))
+        span.end()
+
+    def on_llm_error(
+        self,
+        model: Any,
+        error: Exception,
+    ) -> None:
+        """Called when an LLM call fails.
+
+        Args:
+            model: The LLM/model instance.
+            error: The exception that occurred.
+        """
+        model_name = getattr(model, "model", None) or getattr(model, "model_id", "unknown")
+        span_key = f"llm:{model_name}"
+
+        span = self._active_spans.pop(span_key, None)
+        if span is None:
+            return
+
+        span.record_exception(error)
+        span.set_status(Status(StatusCode.ERROR, str(error)))
+        span.end()
+
+    def on_workflow_step(
+        self,
+        workflow: Any,
+        step_name: str,
+        step_data: Any = None,
+    ) -> None:
+        """Record a workflow step.
+
+        Args:
+            workflow: The workflow instance.
+            step_name: Name of the current step.
+            step_data: Optional data for the step.
+        """
+        workflow_name = getattr(workflow, "name", None) or "workflow"
+
+        attrs = {
+            SpanAttributes.BEEAI_WORKFLOW_NAME: workflow_name,
+            SpanAttributes.BEEAI_WORKFLOW_STEP: step_name,
+            "gen_ai.operation.name": "workflow.step",
+        }
+
+        if step_data is not None:
+            attrs["beeai.workflow.step_data"] = safe_serialize(step_data, max_length=1000)
+
+        with self._tracer.start_as_current_span(
+            name=f"beeai.workflow.{step_name}",
+            kind=SpanKind.INTERNAL,
+            attributes=attrs,
+        ) as span:
+            span.set_status(Status(StatusCode.OK))
+
+
+def create_tracing_middleware(
+    tracer_provider: Optional[trace.TracerProvider] = None,
+    capture_input: bool = True,
+    capture_output: bool = True,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> TraceAIMiddleware:
+    """Create a configured TraceAI middleware for BeeAI agents.
+
+    Args:
+        tracer_provider: Optional OpenTelemetry tracer provider.
+        capture_input: Whether to capture input data.
+        capture_output: Whether to capture output data.
+        session_id: Optional session identifier.
+        user_id: Optional user identifier.
+
+    Returns:
+        Configured TraceAIMiddleware instance.
+    """
+    return TraceAIMiddleware(
+        tracer_provider=tracer_provider,
+        capture_input=capture_input,
+        capture_output=capture_output,
+        session_id=session_id,
+        user_id=user_id,
+    )
