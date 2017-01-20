@@ -157,3 +157,72 @@ def configure_beeai_tracing(
         project_name: Optional project name for trace attributes.
 
     Returns:
+        Configured BeeAIInstrumentorWrapper instance.
+    """
+    wrapper = BeeAIInstrumentorWrapper()
+
+    # Add project name to headers if provided
+    if project_name and otlp_headers is None:
+        otlp_headers = {}
+    if project_name and otlp_headers is not None:
+        otlp_headers["x-project-name"] = project_name
+
+    return wrapper.instrument(
+        tracer_provider=tracer_provider,
+        otlp_endpoint=otlp_endpoint,
+        otlp_headers=otlp_headers,
+    )
+
+
+def setup_traceai_exporter(
+    endpoint: str,
+    headers: Optional[Dict[str, str]] = None,
+    use_batch_processor: bool = True,
+    service_name: str = "beeai-agent",
+) -> TracerProvider:
+    """Set up a tracer provider with OTLP exporter for TraceAI.
+
+    This is a convenience function that creates a complete tracer provider
+    configured to export to TraceAI.
+
+    Args:
+        endpoint: OTLP endpoint URL.
+        headers: Optional headers for authentication.
+        use_batch_processor: Whether to use batch processing (recommended).
+        service_name: Service name for the traces.
+
+    Returns:
+        Configured TracerProvider.
+    """
+    try:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    except ImportError:
+        raise ImportError(
+            "opentelemetry-exporter-otlp is not installed. "
+            "Install it with: pip install opentelemetry-exporter-otlp"
+        )
+
+    # Create resource
+    resource = Resource.create({"service.name": service_name})
+
+    # Create tracer provider
+    provider = SDKTracerProvider(resource=resource)
+
+    # Create exporter
+    exporter = OTLPSpanExporter(
+        endpoint=endpoint,
+        headers=headers or {},
+    )
+
+    # Add span processor
+    if use_batch_processor:
+        processor = BatchSpanProcessor(exporter)
+    else:
+        processor = SimpleSpanProcessor(exporter)
+
+    provider.add_span_processor(processor)
+
+    # Set as global
+    trace.set_tracer_provider(provider)
+
+    return provider
