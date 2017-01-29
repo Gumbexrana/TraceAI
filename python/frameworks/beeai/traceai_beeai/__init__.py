@@ -40,3 +40,21 @@ from traceai_beeai._attributes import (
     get_workflow_attributes,
     get_model_provider,
 )
+from traceai_beeai._middleware import (
+    TraceAIMiddleware,
+    create_tracing_middleware,
+)
+
+__all__ = [
+    "configure_beeai_tracing",
+    "BeeAIInstrumentorWrapper",
+    "SpanAttributes",
+    "get_agent_attributes",
+    "get_tool_attributes",
+    "get_workflow_attributes",
+    "get_model_provider",
+    "TraceAIMiddleware",
+    "create_tracing_middleware",
+]
+
+__version__ = "0.1.0"
