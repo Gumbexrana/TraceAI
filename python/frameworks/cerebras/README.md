@@ -147,3 +147,68 @@ CerebrasInstrumentor().instrument(config=config)
 ```python
 from cerebras.cloud.sdk import Cerebras
 
+client = Cerebras()
+response = client.chat.completions.create(
+    model="llama3.1-8b",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Explain quantum computing."}
+    ],
+    max_tokens=500,
+    temperature=0.7,
+)
+
+print(response.choices[0].message.content)
+```
+
+### Streaming Response
+
+```python
+from cerebras.cloud.sdk import Cerebras
+
+client = Cerebras()
+stream = client.chat.completions.create(
+    model="llama3.1-8b",
+    messages=[{"role": "user", "content": "Write a short story."}],
+    stream=True,
+)
+
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
+
+### Async Usage
+
+```python
+import asyncio
+from cerebras.cloud.sdk import AsyncCerebras
+
+async def main():
+    client = AsyncCerebras()
+    response = await client.chat.completions.create(
+        model="llama3.1-8b",
+        messages=[{"role": "user", "content": "Hello!"}],
+    )
+    print(response.choices[0].message.content)
+
+asyncio.run(main())
+```
+
+## Supported Models
+
+- llama3.1-8b
+- llama3.1-70b
+- And other Cerebras-hosted models
+
+## Requirements
+
+- Python >= 3.9
+- cerebras-cloud-sdk >= 1.0.0
+- opentelemetry-api >= 1.0.0
+- opentelemetry-sdk >= 1.0.0
+- fi-instrumentation >= 0.1.0
+
+## License
+
+Apache-2.0
