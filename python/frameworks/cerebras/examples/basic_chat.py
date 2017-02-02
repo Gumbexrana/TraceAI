@@ -40,3 +40,22 @@ def main():
     print(f"Model: {response.model}")
     print(f"Response: {response.choices[0].message.content}")
     print()
+
+    # Print usage stats
+    if response.usage:
+        print(f"Prompt tokens: {response.usage.prompt_tokens}")
+        print(f"Completion tokens: {response.usage.completion_tokens}")
+        print(f"Total tokens: {response.usage.total_tokens}")
+
+    # Print Cerebras time_info
+    if response.time_info:
+        print()
+        print("Cerebras Performance Metrics:")
+        print(f"  Queue time: {response.time_info.queue_time:.4f}s")
+        print(f"  Prompt time: {response.time_info.prompt_time:.4f}s")
+        print(f"  Completion time: {response.time_info.completion_time:.4f}s")
+        print(f"  Total time: {response.time_info.total_time:.4f}s")
+
+
+if __name__ == "__main__":
+    main()
