@@ -38,3 +38,21 @@ def main():
     )
 
     print("Response: ", end="")
+    for chunk in stream:
+        if chunk.choices[0].delta.content:
+            print(chunk.choices[0].delta.content, end="", flush=True)
+
+        # Last chunk may contain usage info
+        if chunk.usage:
+            print()
+            print()
+            print(f"Total tokens: {chunk.usage.total_tokens}")
+
+        if chunk.time_info:
+            print(f"Total time: {chunk.time_info.total_time:.4f}s")
+
+    print()
+
+
+if __name__ == "__main__":
+    main()
