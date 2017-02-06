@@ -192,3 +192,87 @@ class MockTracer:
         self.spans.append(span)
         return span
 
+    def start_as_current_span(self, name: str, **kwargs):
+        return MockSpanContext(MockSpan(name))
+
+
+class MockSpan:
+    """Mock OpenTelemetry Span."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.attributes = {}
+        self.events = []
+        self.status = None
+        self._ended = False
+
+    def set_attribute(self, key: str, value: Any):
+        self.attributes[key] = value
+
+    def set_attributes(self, attributes: Dict[str, Any]):
+        self.attributes.update(attributes)
+
+    def add_event(self, name: str, attributes: Dict[str, Any] = None):
+        self.events.append({"name": name, "attributes": attributes or {}})
+
+    def set_status(self, status):
+        self.status = status
+
+    def record_exception(self, exception):
+        self.events.append({"name": "exception", "exception": exception})
+
+    def end(self):
+        self._ended = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.end()
+
+
+class MockSpanContext:
+    """Mock span context manager."""
+
+    def __init__(self, span: MockSpan):
+        self.span = span
+
+    def __enter__(self):
+        return self.span
+
+    def __exit__(self, *args):
+        self.span.end()
+
+
+@pytest.fixture
+def mock_completion():
+    """Create a mock chat completion response."""
+    return MockChatCompletion()
+
+
+@pytest.fixture
+def mock_stream_chunks():
+    """Create mock streaming chunks."""
+    return [
+        MockStreamChunk(delta_role="assistant"),
+        MockStreamChunk(delta_content="Hello"),
+        MockStreamChunk(delta_content=" there"),
+        MockStreamChunk(delta_content="!"),
+        MockStreamChunk(
+            finish_reason="stop",
+            usage=MockUsage(),
+            time_info=MockTimeInfo(),
+        ),
+    ]
+
+
+@pytest.fixture
+def mock_tracer_provider():
+    """Create a mock tracer provider."""
+    return MockTracerProvider()
+
+
+@pytest.fixture
+def mock_tracer():
+    """Create a mock tracer."""
+    return MockTracer("test-tracer")
