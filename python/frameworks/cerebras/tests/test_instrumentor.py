@@ -100,3 +100,47 @@ class TestCerebrasInstrumentor:
         instrumentor = CerebrasInstrumentor()
         instrumentor._original_completions_create = MagicMock()
         instrumentor._original_async_completions_create = MagicMock()
+
+        # Mock the module for uninstrument
+        mock_completions_module = MagicMock()
+        mock_completions_module.CompletionsResource = MagicMock()
+        mock_completions_module.AsyncCompletionsResource = MagicMock()
+
+        with patch.dict("sys.modules", {
+            "cerebras.cloud.sdk.resources.chat.completions": mock_completions_module,
+        }):
+            # Should not raise
+            instrumentor._uninstrument()
+
+
+class TestCerebrasInstrumentorIntegration:
+    """Integration tests for CerebrasInstrumentor."""
+
+    def test_instrumentor_singleton_pattern(self):
+        """Test that instrumentor uses singleton pattern."""
+        instrumentor1 = CerebrasInstrumentor()
+        instrumentor2 = CerebrasInstrumentor()
+
+        # BaseInstrumentor implements singleton pattern
+        assert instrumentor1 is instrumentor2
+
+    def test_instrument_idempotent(self):
+        """Test that calling instrument multiple times is safe."""
+        instrumentor = CerebrasInstrumentor()
+
+        mock_completions_module = MagicMock()
+        mock_completions_module.CompletionsResource = MagicMock()
+        mock_completions_module.AsyncCompletionsResource = MagicMock()
+
+        with patch("traceai_cerebras.wrap_function_wrapper"):
+            with patch("traceai_cerebras.trace_api"):
+                with patch.dict("sys.modules", {
+                    "cerebras": MagicMock(),
+                    "cerebras.cloud": MagicMock(),
+                    "cerebras.cloud.sdk": MagicMock(),
+                    "cerebras.cloud.sdk.resources": MagicMock(),
+                    "cerebras.cloud.sdk.resources.chat": MagicMock(),
+                    "cerebras.cloud.sdk.resources.chat.completions": mock_completions_module,
+                }):
+                    instrumentor._instrument()
+                    instrumentor._instrument()  # Should not raise
