@@ -187,3 +187,85 @@ class TestCompletionsWrapper:
 
         result = wrapper(
             wrapped_fn,
+            None,
+            (),
+            {
+                "model": "llama3.1-8b",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": True,
+            },
+        )
+
+        chunks = list(result)
+        assert len(chunks) == 5
+
+    def test_error_handling(self, mock_tracer):
+        """Test error handling in wrapper."""
+        wrapper = _CompletionsWrapper(tracer=mock_tracer)
+        wrapped_fn = MagicMock(side_effect=Exception("API Error"))
+
+        with pytest.raises(Exception) as exc_info:
+            wrapper(
+                wrapped_fn,
+                None,
+                (),
+                {"model": "llama3.1-8b", "messages": []},
+            )
+
+        assert "API Error" in str(exc_info.value)
+
+
+class TestAsyncCompletionsWrapper:
+    """Tests for _AsyncCompletionsWrapper class."""
+
+    @pytest.mark.asyncio
+    async def test_async_non_streaming_call(self, mock_tracer, mock_completion):
+        """Test async non-streaming completion call."""
+        wrapper = _AsyncCompletionsWrapper(tracer=mock_tracer)
+        wrapped_fn = AsyncMock(return_value=mock_completion)
+
+        result = await wrapper(
+            wrapped_fn,
+            None,
+            (),
+            {"model": "llama3.1-8b", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+        assert result == mock_completion
+        wrapped_fn.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_error_handling(self, mock_tracer):
+        """Test async error handling in wrapper."""
+        wrapper = _AsyncCompletionsWrapper(tracer=mock_tracer)
+        wrapped_fn = AsyncMock(side_effect=Exception("API Error"))
+
+        with pytest.raises(Exception) as exc_info:
+            await wrapper(
+                wrapped_fn,
+                None,
+                (),
+                {"model": "llama3.1-8b", "messages": []},
+            )
+
+        assert "API Error" in str(exc_info.value)
+
+
+class TestCerebrasSpecificAttributes:
+    """Tests for Cerebras-specific attributes."""
+
+    def test_time_info_constants(self):
+        """Test that Cerebras time_info constants are defined."""
+        assert CEREBRAS_QUEUE_TIME == "cerebras.queue_time"
+        assert CEREBRAS_PROMPT_TIME == "cerebras.prompt_time"
+        assert CEREBRAS_COMPLETION_TIME == "cerebras.completion_time"
+        assert CEREBRAS_TOTAL_TIME == "cerebras.total_time"
+
+    def test_time_info_in_response(self, mock_completion):
+        """Test time_info extraction from response."""
+        attrs = _get_output_attributes(mock_completion)
+
+        assert attrs[CEREBRAS_QUEUE_TIME] == 0.001
+        assert attrs[CEREBRAS_PROMPT_TIME] == 0.010
+        assert attrs[CEREBRAS_COMPLETION_TIME] == 0.050
+        assert attrs[CEREBRAS_TOTAL_TIME] == 0.061
