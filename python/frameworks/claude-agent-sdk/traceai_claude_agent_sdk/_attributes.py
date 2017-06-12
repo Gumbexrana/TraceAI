@@ -121,3 +121,57 @@ class ClaudeAgentAttributes:
     TIME_TO_FIRST_TOKEN_MS = "claude_agent.time_to_first_token_ms"
 
     # =========================================================================
+    # Error Attributes
+    # =========================================================================
+    ERROR_TYPE = "claude_agent.error.type"
+    ERROR_MESSAGE = "claude_agent.error.message"
+    IS_ERROR = "claude_agent.is_error"
+
+    # =========================================================================
+    # Hook Attributes
+    # =========================================================================
+    HOOK_TYPE = "claude_agent.hook.type"
+    HOOK_MATCHER = "claude_agent.hook.matcher"
+    HOOK_BLOCKED = "claude_agent.hook.blocked"
+    HOOK_MODIFIED = "claude_agent.hook.modified"
+
+
+# Built-in tool names
+BUILTIN_TOOLS = frozenset([
+    "Read",
+    "Write",
+    "Edit",
+    "Bash",
+    "Glob",
+    "Grep",
+    "WebSearch",
+    "WebFetch",
+    "AskUserQuestion",
+    "Task",
+    "NotebookEdit",
+    "TodoRead",
+    "TodoWrite",
+])
+
+
+def get_tool_source(tool_name: str, mcp_servers: dict = None) -> str:
+    """Determine the source of a tool.
+
+    Args:
+        tool_name: Name of the tool
+        mcp_servers: Dictionary of MCP server configurations
+
+    Returns:
+        "builtin", "mcp", or "custom"
+    """
+    if tool_name in BUILTIN_TOOLS:
+        return "builtin"
+
+    if mcp_servers:
+        # Check if tool comes from an MCP server
+        for server_name, config in mcp_servers.items():
+            # MCP tools are typically prefixed with server name
+            if tool_name.startswith(f"mcp__{server_name}__"):
+                return "mcp"
+
+    return "custom"
