@@ -338,3 +338,149 @@ def wrap_claude_sdk_client(
                     conversation_span.set_status(
                         Status(StatusCode.ERROR, str(e))
                     )
+                    conversation_span.record_exception(e)
+                    raise
+
+                finally:
+                    turn_tracker.end_current_turn()
+                    clear_parent_span()
+                    clear_active_tool_spans()
+
+        def _build_span_attributes(self) -> Dict[str, Any]:
+            """Build span attributes from options and prompt."""
+            attrs = {
+                ClaudeAgentAttributes.SPAN_KIND: ClaudeAgentSpanKind.CONVERSATION.value,
+            }
+
+            if self._prompt:
+                attrs[ClaudeAgentAttributes.AGENT_PROMPT] = self._prompt[:2000]
+
+            if self._options:
+                # Model
+                model = getattr(self._options, "model", None)
+                if model:
+                    attrs[ClaudeAgentAttributes.AGENT_MODEL] = model
+
+                # Permission mode
+                perm_mode = getattr(self._options, "permission_mode", None)
+                if perm_mode:
+                    attrs[ClaudeAgentAttributes.AGENT_PERMISSION_MODE] = perm_mode
+
+                # Allowed tools
+                allowed_tools = getattr(self._options, "allowed_tools", None)
+                if allowed_tools:
+                    attrs[ClaudeAgentAttributes.AGENT_ALLOWED_TOOLS] = json.dumps(
+                        allowed_tools
+                    )
+
+                # System prompt
+                system_prompt = getattr(self._options, "system_prompt", None)
+                if system_prompt:
+                    if isinstance(system_prompt, str):
+                        attrs[ClaudeAgentAttributes.AGENT_SYSTEM_PROMPT] = (
+                            system_prompt[:1000]
+                        )
+                    elif isinstance(system_prompt, dict):
+                        attrs[ClaudeAgentAttributes.AGENT_SYSTEM_PROMPT] = json.dumps(
+                            system_prompt
+                        )[:1000]
+
+                # Resume session
+                resume = getattr(self._options, "resume", None)
+                if resume:
+                    attrs[ClaudeAgentAttributes.AGENT_IS_RESUMED] = True
+                    attrs[ClaudeAgentAttributes.AGENT_RESUME_SESSION_ID] = resume
+
+            return attrs
+
+        def _extract_content(self, msg: Any) -> Optional[str]:
+            """Extract content from a message."""
+            content = getattr(msg, "content", None)
+            if not content:
+                return None
+
+            if isinstance(content, str):
+                return content
+
+            if isinstance(content, list):
+                parts = []
+                for block in content:
+                    if hasattr(block, "text"):
+                        parts.append(block.text)
+                    elif type(block).__name__ == "ToolResultBlock":
+                        result = getattr(block, "content", "")
+                        parts.append(f"[Tool Result: {result[:100]}...]")
+                return " ".join(parts) if parts else None
+
+            return str(content)
+
+        def _extract_usage(self, msg: Any) -> Optional[Dict[str, Any]]:
+            """Extract usage metrics from ResultMessage."""
+            usage = getattr(msg, "usage", None)
+            if not usage:
+                return None
+
+            return {
+                "input_tokens": getattr(usage, "input_tokens", 0),
+                "output_tokens": getattr(usage, "output_tokens", 0),
+                "cache_read_input_tokens": getattr(
+                    usage, "cache_read_input_tokens", 0
+                ),
+                "cache_creation_input_tokens": getattr(
+                    usage, "cache_creation_input_tokens", 0
+                ),
+            }
+
+        def _set_result_attributes(self, span: Span, msg: Any) -> None:
+            """Set conversation result attributes."""
+            # Usage
+            usage = self._extract_usage(msg)
+            if usage:
+                span.set_attribute(
+                    ClaudeAgentAttributes.USAGE_INPUT_TOKENS,
+                    usage.get("input_tokens", 0),
+                )
+                span.set_attribute(
+                    ClaudeAgentAttributes.USAGE_OUTPUT_TOKENS,
+                    usage.get("output_tokens", 0),
+                )
+
+                total = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                span.set_attribute(ClaudeAgentAttributes.USAGE_TOTAL_TOKENS, total)
+
+            # Cost
+            total_cost = getattr(msg, "total_cost_usd", None)
+            if total_cost is not None:
+                span.set_attribute(ClaudeAgentAttributes.COST_TOTAL_USD, total_cost)
+
+            # Performance
+            duration_ms = getattr(msg, "duration_ms", None)
+            if duration_ms is not None:
+                span.set_attribute(ClaudeAgentAttributes.DURATION_MS, duration_ms)
+
+            duration_api_ms = getattr(msg, "duration_api_ms", None)
+            if duration_api_ms is not None:
+                span.set_attribute(ClaudeAgentAttributes.DURATION_API_MS, duration_api_ms)
+
+            # Session
+            session_id = getattr(msg, "session_id", None)
+            if session_id:
+                span.set_attribute(ClaudeAgentAttributes.AGENT_SESSION_ID, session_id)
+
+            # Turns
+            num_turns = getattr(msg, "num_turns", None)
+            if num_turns is not None:
+                span.set_attribute(ClaudeAgentAttributes.AGENT_NUM_TURNS, num_turns)
+
+            # Error
+            is_error = getattr(msg, "is_error", False)
+            span.set_attribute(ClaudeAgentAttributes.IS_ERROR, is_error)
+
+        async def __aenter__(self) -> "TracedClaudeSDKClient":
+            await super().__aenter__()
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            await super().__aexit__(*args)
+
+    return TracedClaudeSDKClient
