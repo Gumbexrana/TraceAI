@@ -289,3 +289,128 @@ def create_post_tool_use_hook(tracer: trace_api.Tracer) -> Callable:
 
             # Add completion event
             span.add_event(
+                "tool_complete",
+                {
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "duration_ms": duration_ms,
+                    "is_error": is_error,
+                },
+            )
+
+            # End the span
+            span.end()
+
+            # Clean up subagent span if this was a Task tool
+            if tool_name == "Task":
+                _subagent_spans.pop(tool_use_id, None)
+
+            logger.debug(
+                f"Completed tool trace: {tool_name} "
+                f"(id={tool_use_id}, duration={duration_ms:.2f}ms)"
+            )
+
+        except Exception as e:
+            logger.warning(f"Error in PostToolUse hook for {tool_name}: {e}")
+
+        return {}
+
+    return post_tool_use_hook
+
+
+def _set_tool_specific_attributes(
+    span: Span, tool_name: str, tool_input: Dict[str, Any]
+) -> None:
+    """Set tool-specific attributes based on tool type.
+
+    Args:
+        span: The span to set attributes on
+        tool_name: Name of the tool
+        tool_input: Tool input parameters
+    """
+    if tool_name == "Read":
+        if "file_path" in tool_input:
+            span.set_attribute(
+                ClaudeAgentAttributes.TOOL_FILE_PATH,
+                tool_input["file_path"],
+            )
+
+    elif tool_name == "Write":
+        if "file_path" in tool_input:
+            span.set_attribute(
+                ClaudeAgentAttributes.TOOL_FILE_PATH,
+                tool_input["file_path"],
+            )
+
+    elif tool_name == "Edit":
+        if "file_path" in tool_input:
+            span.set_attribute(
+                ClaudeAgentAttributes.TOOL_FILE_PATH,
+                tool_input["file_path"],
+            )
+
+    elif tool_name == "Bash":
+        if "command" in tool_input:
+            span.set_attribute(
+                ClaudeAgentAttributes.TOOL_COMMAND,
+                tool_input["command"][:500],
+            )
+
+    elif tool_name == "Glob":
+        if "pattern" in tool_input:
+            span.set_attribute(
+                ClaudeAgentAttributes.TOOL_PATTERN,
+                tool_input["pattern"],
+            )
+
+    elif tool_name == "Grep":
+        if "pattern" in tool_input:
+            span.set_attribute(
+                ClaudeAgentAttributes.TOOL_PATTERN,
+                tool_input["pattern"],
+            )
+
+    elif tool_name == "WebSearch":
+        if "query" in tool_input:
+            span.set_attribute(
+                ClaudeAgentAttributes.TOOL_SEARCH_QUERY,
+                tool_input["query"],
+            )
+
+    elif tool_name == "WebFetch":
+        if "url" in tool_input:
+            span.set_attribute(
+                ClaudeAgentAttributes.TOOL_URL,
+                tool_input["url"],
+            )
+
+
+def clear_active_tool_spans() -> None:
+    """Clear all active tool spans.
+
+    Should be called when a conversation ends to avoid memory leaks.
+    """
+    global _active_tool_spans, _subagent_spans
+
+    # End any orphaned spans
+    for tool_use_id, (span, start_time, tool_name) in _active_tool_spans.items():
+        try:
+            span.set_status(
+                Status(StatusCode.ERROR, "Tool span not completed (conversation ended)")
+            )
+            span.end()
+            logger.debug(f"Cleaned up orphaned tool span: {tool_name}")
+        except Exception as e:
+            logger.debug(f"Failed to clean up tool span {tool_use_id}: {e}")
+
+    for tool_use_id, span in _subagent_spans.items():
+        try:
+            span.set_status(
+                Status(StatusCode.ERROR, "Subagent span not completed")
+            )
+            span.end()
+        except Exception:
+            pass
+
+    _active_tool_spans.clear()
+    _subagent_spans.clear()
