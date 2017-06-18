@@ -142,3 +142,66 @@ class ClaudeAgentInstrumentor(BaseInstrumentor):
             except Exception:
                 continue
 
+        logger.debug("Patched ClaudeSDKClient")
+
+    def _uninstrument(self, **kwargs: Any) -> None:
+        """Remove Claude Agent SDK instrumentation."""
+        if not self._is_instrumented:
+            return
+
+        try:
+            import claude_agent_sdk
+
+            # Restore original class
+            if self._original_client_class:
+                claude_agent_sdk.ClaudeSDKClient = self._original_client_class
+
+                # Restore in other modules
+                for module in list(sys.modules.values()):
+                    try:
+                        if module and hasattr(module, "ClaudeSDKClient"):
+                            setattr(module, "ClaudeSDKClient", self._original_client_class)
+                    except Exception:
+                        continue
+
+                self._original_client_class = None
+
+        except ImportError:
+            pass
+
+        self._is_instrumented = False
+        self._tracer = None
+
+        logger.info("Claude Agent SDK instrumentation disabled")
+
+    @property
+    def is_instrumented(self) -> bool:
+        """Check if Claude Agent SDK is instrumented."""
+        return self._is_instrumented
+
+
+# Convenience function for simple initialization
+def instrument_claude_agent_sdk(tracer_provider: Optional[Any] = None) -> ClaudeAgentInstrumentor:
+    """Convenience function to instrument Claude Agent SDK.
+
+    Args:
+        tracer_provider: Optional OpenTelemetry tracer provider
+
+    Returns:
+        The instrumentor instance
+
+    Example:
+        from traceai_claude_agent_sdk import instrument_claude_agent_sdk
+
+        instrument_claude_agent_sdk()
+
+        # Now use Claude Agent SDK - tracing is automatic
+    """
+    instrumentor = ClaudeAgentInstrumentor()
+
+    kwargs = {}
+    if tracer_provider:
+        kwargs["tracer_provider"] = tracer_provider
+
+    instrumentor.instrument(**kwargs)
+    return instrumentor
