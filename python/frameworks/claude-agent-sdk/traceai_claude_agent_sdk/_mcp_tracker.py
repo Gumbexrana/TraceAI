@@ -207,3 +207,93 @@ class MCPTracker:
                 server_info.total_duration_ms += duration_ms
 
         # Parse and set the actual tool name (without prefix)
+        parsed = self.parse_tool_name(tool_name)
+        if parsed:
+            span.set_attribute("claude_agent.mcp.tool_name", parsed["tool"])
+
+        return True
+
+    def get_server_info(self, server_name: str) -> Optional[MCPServerInfo]:
+        """Get information about an MCP server.
+
+        Args:
+            server_name: Name of the server
+
+        Returns:
+            MCPServerInfo or None
+        """
+        return self._servers.get(server_name)
+
+    def get_server_stats(self, server_name: str) -> Dict[str, Any]:
+        """Get usage statistics for a server.
+
+        Args:
+            server_name: Name of the server
+
+        Returns:
+            Dict with usage statistics
+        """
+        info = self._servers.get(server_name)
+        if not info:
+            return {}
+
+        return {
+            "name": info.name,
+            "command": info.command,
+            "tool_count": len(info.tools),
+            "tools": list(info.tools),
+            "total_calls": info.tool_calls,
+            "total_duration_ms": info.total_duration_ms,
+        }
+
+    def get_all_server_stats(self) -> Dict[str, Dict[str, Any]]:
+        """Get usage statistics for all servers.
+
+        Returns:
+            Dict of server name to stats
+        """
+        return {
+            name: self.get_server_stats(name)
+            for name in self._servers
+        }
+
+    def annotate_conversation_span(self, span: Span) -> None:
+        """Annotate a conversation span with MCP server info.
+
+        Args:
+            span: Conversation span to annotate
+        """
+        if not self._servers:
+            return
+
+        # List of configured servers
+        server_names = list(self._servers.keys())
+        span.set_attribute("claude_agent.mcp.servers", ",".join(server_names))
+        span.set_attribute("claude_agent.mcp.server_count", len(server_names))
+
+        # Count of tools by server
+        tool_counts = {
+            name: len(info.tools)
+            for name, info in self._servers.items()
+        }
+        if any(tool_counts.values()):
+            span.set_attribute(
+                "claude_agent.mcp.discovered_tools",
+                sum(tool_counts.values()),
+            )
+
+    def clear(self) -> None:
+        """Clear all MCP server tracking."""
+        self._servers.clear()
+        self._tool_to_server.clear()
+        logger.debug("Cleared all MCP server tracking")
+
+    @property
+    def server_count(self) -> int:
+        """Number of registered servers."""
+        return len(self._servers)
+
+    @property
+    def server_names(self) -> List[str]:
+        """List of registered server names."""
+        return list(self._servers.keys())
