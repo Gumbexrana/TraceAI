@@ -249,3 +249,111 @@ class SessionTracker:
 
         Args:
             session_id: Session identifier
+            input_tokens: Input tokens to add
+            output_tokens: Output tokens to add
+            cost_usd: Cost to add
+            turns: Turns to add
+        """
+        info = self._sessions.get(session_id)
+        if info:
+            info.total_input_tokens += input_tokens
+            info.total_output_tokens += output_tokens
+            info.total_cost_usd += cost_usd
+            info.total_turns += turns
+
+    def get_session(self, session_id: str) -> Optional[SessionInfo]:
+        """Get information about a session.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            SessionInfo or None
+        """
+        return self._sessions.get(session_id)
+
+    def get_active_session(self) -> Optional[SessionInfo]:
+        """Get the currently active session.
+
+        Returns:
+            SessionInfo or None
+        """
+        if self._active_session_id:
+            return self._sessions.get(self._active_session_id)
+        return None
+
+    def end_session(self, session_id: str, span: Span) -> Optional[SessionInfo]:
+        """Mark a session as ended and record final metrics.
+
+        Args:
+            session_id: Session identifier
+            span: Span to annotate with final metrics
+
+        Returns:
+            SessionInfo or None
+        """
+        info = self._sessions.get(session_id)
+        if not info:
+            return None
+
+        # Record aggregated metrics
+        span.set_attribute(
+            "claude_agent.session.total_queries",
+            info.total_queries,
+        )
+        span.set_attribute(
+            "claude_agent.session.total_input_tokens",
+            info.total_input_tokens,
+        )
+        span.set_attribute(
+            "claude_agent.session.total_output_tokens",
+            info.total_output_tokens,
+        )
+        span.set_attribute(
+            "claude_agent.session.total_cost_usd",
+            info.total_cost_usd,
+        )
+        span.set_attribute(
+            "claude_agent.session.total_turns",
+            info.total_turns,
+        )
+
+        if self._active_session_id == session_id:
+            self._active_session_id = None
+
+        logger.debug(f"Ended session {session_id}")
+
+        return info
+
+    def get_session_history(self, session_id: str) -> List[str]:
+        """Get the chain of session IDs leading to this session.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            List of session IDs from oldest to current
+        """
+        history = []
+        current_id = session_id
+
+        while current_id:
+            history.insert(0, current_id)
+            info = self._sessions.get(current_id)
+            if info:
+                current_id = info.previous_session_id
+            else:
+                break
+
+        return history
+
+    def clear(self) -> None:
+        """Clear all session tracking."""
+        self._sessions.clear()
+        self._active_session_id = None
+        logger.debug("Cleared all session tracking")
+
+    @property
+    def session_count(self) -> int:
+        """Number of tracked sessions."""
+        return len(self._sessions)
