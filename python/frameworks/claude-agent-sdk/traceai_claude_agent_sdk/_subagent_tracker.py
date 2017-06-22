@@ -258,3 +258,115 @@ class SubagentTracker:
 
     def get_active_subagent(self, tool_use_id: str) -> Optional[SubagentInfo]:
         """Get info about an active subagent.
+
+        Args:
+            tool_use_id: ID of the subagent
+
+        Returns:
+            SubagentInfo or None
+        """
+        return self._active_subagents.get(tool_use_id)
+
+    def get_parent_subagent_span(self, parent_tool_use_id: str) -> Optional[Span]:
+        """Get the span for a parent subagent.
+
+        Args:
+            parent_tool_use_id: ID of the parent Task tool
+
+        Returns:
+            Parent span or None
+        """
+        info = self._active_subagents.get(parent_tool_use_id)
+        return info.span if info else None
+
+    def is_nested_subagent(self, tool_use_id: str) -> bool:
+        """Check if a subagent is nested within another.
+
+        Args:
+            tool_use_id: ID of the subagent
+
+        Returns:
+            True if nested, False otherwise
+        """
+        info = self._active_subagents.get(tool_use_id)
+        return info is not None and info.parent_tool_use_id is not None
+
+    def get_hierarchy_costs(self, root_tool_use_id: str) -> Dict[str, Any]:
+        """Get aggregated costs for a subagent hierarchy.
+
+        Args:
+            root_tool_use_id: ID of the root subagent
+
+        Returns:
+            Dict with aggregated metrics
+        """
+        # Check active first, then completed
+        info = self._active_subagents.get(root_tool_use_id)
+        if not info:
+            info = self._completed_subagents.get(root_tool_use_id)
+
+        if not info:
+            return {}
+
+        return {
+            "input_tokens": info.total_input_tokens,
+            "output_tokens": info.total_output_tokens,
+            "total_cost_usd": info.total_cost_usd,
+            "tool_calls": info.tool_calls,
+            "turns": info.turns,
+            "child_subagents": len(info.child_subagent_ids),
+        }
+
+    def _aggregate_child_costs(self, parent_tool_use_id: str) -> Optional[Dict[str, Any]]:
+        """Aggregate costs from child subagents.
+
+        Args:
+            parent_tool_use_id: ID of the parent subagent
+
+        Returns:
+            Aggregated costs or None
+        """
+        parent_info = self._active_subagents.get(parent_tool_use_id)
+        if not parent_info or not parent_info.child_subagent_ids:
+            return None
+
+        total_input = 0
+        total_output = 0
+        total_cost = 0.0
+
+        for child_id in parent_info.child_subagent_ids:
+            child_info = self._completed_subagents.get(child_id)
+            if child_info:
+                total_input += child_info.total_input_tokens
+                total_output += child_info.total_output_tokens
+                total_cost += child_info.total_cost_usd
+
+        return {
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "total_cost_usd": total_cost,
+        }
+
+    def clear(self) -> None:
+        """Clear all tracked subagents.
+
+        Note: This will end any active subagent spans.
+        """
+        for tool_use_id, info in list(self._active_subagents.items()):
+            info.span.set_status(Status(StatusCode.ERROR, "Cleared before completion"))
+            info.span.end()
+
+        self._active_subagents.clear()
+        self._completed_subagents.clear()
+
+        logger.debug("Cleared all subagent tracking")
+
+    @property
+    def active_count(self) -> int:
+        """Number of active subagents."""
+        return len(self._active_subagents)
+
+    @property
+    def completed_count(self) -> int:
+        """Number of completed subagents."""
+        return len(self._completed_subagents)
