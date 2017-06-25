@@ -34,3 +34,19 @@ from traceai_claude_agent_sdk._attributes import (
 )
 from traceai_claude_agent_sdk._subagent_tracker import SubagentTracker
 from traceai_claude_agent_sdk._session_tracker import SessionTracker
+from traceai_claude_agent_sdk._mcp_tracker import MCPTracker
+
+__version__ = "0.1.0"
+
+__all__ = [
+    # Main API
+    "ClaudeAgentInstrumentor",
+    "instrument_claude_agent_sdk",
+    # Attributes
+    "ClaudeAgentAttributes",
+    "ClaudeAgentSpanKind",
+    # Advanced: Trackers
+    "SubagentTracker",
+    "SessionTracker",
+    "MCPTracker",
+]
