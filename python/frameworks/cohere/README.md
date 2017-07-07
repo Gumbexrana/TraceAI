@@ -219,3 +219,98 @@ CohereInstrumentor().instrument(
 ### Chat Attributes
 
 | Attribute | Description |
+|-----------|-------------|
+| `fi.span.kind` | "LLM" |
+| `llm.system` | "cohere" |
+| `llm.model` | Model name (command-r-plus, etc.) |
+| `llm.token_count.prompt` | Input token count |
+| `llm.token_count.completion` | Output token count |
+| `cohere.finish_reason` | Response finish reason |
+| `cohere.citations_count` | Number of citations |
+| `cohere.tool_calls_count` | Number of tool calls |
+
+### Embed Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `fi.span.kind` | "EMBEDDING" |
+| `embedding.model` | Embedding model name |
+| `cohere.texts_count` | Number of texts embedded |
+| `cohere.embedding_dimensions` | Vector dimensions |
+
+### Rerank Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `fi.span.kind` | "RERANKER" |
+| `reranker.model` | Rerank model name |
+| `reranker.query` | Search query |
+| `reranker.top_k` | Top N results requested |
+| `cohere.results_count` | Number of results |
+| `cohere.rerank.scores` | Relevance scores |
+
+## Available Models
+
+| Category | Models |
+|----------|--------|
+| Chat | `command-r-plus`, `command-r`, `command` |
+| Embed | `embed-english-v3.0`, `embed-multilingual-v3.0` |
+| Rerank | `rerank-english-v3.0`, `rerank-multilingual-v3.0` |
+
+## Real-World Use Cases
+
+### Semantic Search
+
+```python
+import cohere
+
+client = cohere.Client()
+
+# Index documents
+documents = ["doc1", "doc2", "doc3"]
+doc_embeddings = client.embed(
+    model="embed-english-v3.0",
+    texts=documents,
+    input_type="search_document"
+).embeddings
+
+# Search query
+query_embedding = client.embed(
+    model="embed-english-v3.0",
+    texts=["search query"],
+    input_type="search_query"
+).embeddings[0]
+
+# Compute similarity (not shown: use vector DB)
+```
+
+### Two-Stage RAG
+
+```python
+import cohere
+
+client = cohere.Client()
+
+# Stage 1: Semantic search (not shown)
+initial_results = ["doc1", "doc2", "doc3", "doc4", "doc5"]
+
+# Stage 2: Rerank for precision
+reranked = client.rerank(
+    model="rerank-english-v3.0",
+    query="user question",
+    documents=initial_results,
+    top_n=3
+)
+
+# Stage 3: Generate with top results
+top_docs = [initial_results[r.index] for r in reranked.results]
+response = client.chat(
+    model="command-r-plus",
+    message="user question",
+    documents=[{"text": d} for d in top_docs]
+)
+```
+
+## License
+
+Apache-2.0
