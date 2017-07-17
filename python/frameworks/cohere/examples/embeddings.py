@@ -65,3 +65,33 @@ def main():
     print(f"\nQuery: {query}")
     print("Similarities:")
     query_embedding = query_response.embeddings[0]
+    for i, doc_embedding in enumerate(doc_response.embeddings):
+        similarity = cosine_similarity(query_embedding, doc_embedding)
+        print(f"  {similarity:.4f}: {documents[i]}")
+
+    # Multilingual embeddings
+    print("\n=== Multilingual Embeddings ===")
+    texts = [
+        "Hello, how are you?",
+        "Bonjour, comment allez-vous?",
+        "Hola, como estas?",
+    ]
+    multi_response = client.embed(
+        model="embed-multilingual-v3.0",
+        texts=texts,
+        input_type="search_document",
+    )
+    print(f"Embedded {len(texts)} texts in different languages")
+
+    # Show similarities between languages
+    print("Cross-lingual similarities:")
+    for i in range(len(texts)):
+        for j in range(i + 1, len(texts)):
+            sim = cosine_similarity(
+                multi_response.embeddings[i], multi_response.embeddings[j]
+            )
+            print(f"  {sim:.4f}: '{texts[i][:20]}...' vs '{texts[j][:20]}...'")
+
+
+if __name__ == "__main__":
+    main()
