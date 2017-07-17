@@ -35,3 +35,19 @@ def main():
             {"role": "USER", "message": "My name is Alice"},
             {"role": "CHATBOT", "message": "Hello Alice! Nice to meet you."},
         ],
+    )
+    print(f"Response: {response.text}\n")
+
+    # Streaming chat
+    print("=== Streaming Chat ===")
+    for event in client.chat_stream(
+        model="command-r-plus",
+        message="Count to 5.",
+    ):
+        if event.event_type == "text-generation":
+            print(event.text, end="", flush=True)
+    print("\n")
+
+
+if __name__ == "__main__":
+    main()
