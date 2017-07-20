@@ -44,3 +44,24 @@ def main():
     print("Top results:")
     for result in response.results:
         print(f"  Score: {result.relevance_score:.4f}")
+        print(f"  Document: {documents[result.index]}\n")
+
+    # Use top results for RAG
+    print("=== RAG with Top Results ===")
+    top_docs = [{"text": documents[r.index]} for r in response.results]
+
+    rag_response = client.chat(
+        model="command-r-plus",
+        message=query,
+        documents=top_docs,
+    )
+    print(f"Answer: {rag_response.text}")
+
+    if rag_response.citations:
+        print("\nCitations:")
+        for citation in rag_response.citations:
+            print(f"  - {citation}")
+
+
+if __name__ == "__main__":
+    main()
