@@ -224,3 +224,101 @@ class TestRerankResponseAttributesExtractor:
         from traceai_cohere._response_attributes_extractor import _RerankResponseAttributesExtractor
 
         extractor = _RerankResponseAttributesExtractor()
+        response = {
+            "results": [
+                {"index": 0, "relevance_score": 0.95},
+                {"index": 2, "relevance_score": 0.82},
+                {"index": 1, "relevance_score": 0.75},
+            ],
+        }
+
+        extra_attrs = dict(extractor.get_extra_attributes(response, {}))
+
+        assert extra_attrs.get("cohere.results_count") == 3
+        assert extra_attrs.get("cohere.rerank.0.relevance_score") == 0.95
+
+
+class TestUtils:
+    """Tests for utility functions."""
+
+    def test_to_dict_with_dict(self):
+        """Test _to_dict with dictionary input."""
+        from traceai_cohere._utils import _to_dict
+
+        input_dict = {"key": "value"}
+        result = _to_dict(input_dict)
+
+        assert result == input_dict
+
+    def test_to_dict_with_none(self):
+        """Test _to_dict with None input."""
+        from traceai_cohere._utils import _to_dict
+
+        result = _to_dict(None)
+
+        assert result == {}
+
+
+class TestRealWorldScenarios:
+    """Tests for real-world RAG scenarios."""
+
+    def test_rag_pipeline_attributes(self):
+        """Test attributes for a typical RAG pipeline."""
+        from traceai_cohere._request_attributes_extractor import (
+            _ChatRequestAttributesExtractor,
+            _EmbedRequestAttributesExtractor,
+            _RerankRequestAttributesExtractor,
+        )
+
+        # Step 1: Embed query
+        embed_extractor = _EmbedRequestAttributesExtractor()
+        embed_params = {
+            "model": "embed-english-v3.0",
+            "texts": ["What is machine learning?"],
+            "input_type": "search_query",
+        }
+        embed_attrs = dict(embed_extractor.get_attributes_from_request(embed_params))
+        assert embed_attrs["fi.span.kind"] == "EMBEDDING"
+
+        # Step 2: Rerank results
+        rerank_extractor = _RerankRequestAttributesExtractor()
+        rerank_params = {
+            "model": "rerank-english-v3.0",
+            "query": "What is machine learning?",
+            "documents": ["ML is...", "AI is...", "Deep learning..."],
+            "top_n": 2,
+        }
+        rerank_attrs = dict(rerank_extractor.get_attributes_from_request(rerank_params))
+        assert rerank_attrs["fi.span.kind"] == "RERANKER"
+
+        # Step 3: Generate with context
+        chat_extractor = _ChatRequestAttributesExtractor()
+        chat_params = {
+            "model": "command-r-plus",
+            "message": "What is machine learning?",
+            "documents": [{"text": "ML is a subset of AI..."}],
+        }
+        chat_attrs = dict(chat_extractor.get_attributes_from_request(chat_params))
+        assert chat_attrs["fi.span.kind"] == "LLM"
+
+    def test_invocation_parameters(self):
+        """Test extraction of invocation parameters."""
+        from traceai_cohere._request_attributes_extractor import _ChatRequestAttributesExtractor
+
+        extractor = _ChatRequestAttributesExtractor()
+        request_params = {
+            "model": "command-r-plus",
+            "message": "Hello",
+            "temperature": 0.7,
+            "max_tokens": 500,
+            "k": 0,
+            "p": 0.9,
+            "frequency_penalty": 0.5,
+        }
+
+        attributes = dict(extractor.get_attributes_from_request(request_params))
+
+        assert "llm.invocation_parameters" in attributes
+        params = json.loads(attributes["llm.invocation_parameters"])
+        assert params["temperature"] == 0.7
+        assert params["max_tokens"] == 500
