@@ -285,3 +285,126 @@ class _KickoffWrapper:
                 else:
                     # version 0.51 and onwards
                     span.set_attribute(
+                        GEN_AI_USAGE_INPUT_TOKENS, usage_metrics.prompt_tokens
+                    )
+                    span.set_attribute(
+                        GEN_AI_USAGE_OUTPUT_TOKENS, usage_metrics.completion_tokens
+                    )
+                    span.set_attribute(
+                        GEN_AI_USAGE_TOTAL_TOKENS, usage_metrics.total_tokens
+                    )
+
+            except Exception as exception:
+                span.set_status(
+                    trace_api.Status(trace_api.StatusCode.ERROR, str(exception))
+                )
+                span.record_exception(exception)
+                raise
+            span.set_status(trace_api.StatusCode.OK)
+            if crew_output_dict := crew_output.to_dict():
+
+                span.set_attribute(OUTPUT_VALUE, json.dumps(crew_output_dict))
+                span.set_attribute(OUTPUT_MIME_TYPE, "application/json")
+            else:
+                span.set_attribute(OUTPUT_VALUE, str(crew_output))
+            span.set_attributes(dict(get_attributes_from_context()))
+        return crew_output
+
+
+class _ToolUseWrapper:
+    def __init__(self, tracer: trace_api.Tracer) -> None:
+        self._tracer = tracer
+
+    def __call__(
+        self,
+        wrapped: Callable[..., Any],
+        instance: Any,
+        args: Tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if context_api.get_value(context_api._SUPPRESS_INSTRUMENTATION_KEY):
+            return wrapped(*args, **kwargs)
+        if instance:
+            span_name = f"{instance.__class__.__name__}.{wrapped.__name__}"
+        else:
+            span_name = wrapped.__name__
+        with self._tracer.start_as_current_span(
+            span_name,
+            attributes=dict(
+                _flatten(
+                    {
+                        GEN_AI_SPAN_KIND: FiSpanKindValues.TOOL,
+                        SpanAttributes.INPUT_VALUE: _get_input_value(
+                            wrapped,
+                            *args,
+                            **kwargs,
+                        ),
+                    }
+                )
+            ),
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            tool = kwargs.get("tool")
+            tool_name = ""
+            if tool:
+                tool_name = tool.name
+            span.set_attribute("function_calling_llm", instance.function_calling_llm)
+            span.set_attribute(SpanAttributes.GEN_AI_TOOL_NAME, tool_name)
+
+            span.set_attribute(
+                SpanAttributes.INPUT_VALUE,
+                safe_json_dumps(_prepare_args_kwargs(args=args, **kwargs)),
+            )
+
+            try:
+                response = wrapped(*args, **kwargs)
+            except Exception as exception:
+                span.set_status(
+                    trace_api.Status(trace_api.StatusCode.ERROR, str(exception))
+                )
+                span.record_exception(exception)
+                raise
+            span.set_status(trace_api.StatusCode.OK)
+            span.set_attribute(OUTPUT_VALUE, safe_json_dumps(response))
+            span.set_attribute(OUTPUT_VALUE, safe_json_dumps(response))
+            span.set_attributes(dict(get_attributes_from_context()))
+        return response
+
+
+def _convert_to_dict(obj: Any) -> Any:
+    """
+    Recursively converts objects to dicts if they have a to_dict method or __dict__ attribute.
+    Handles nested lists and dictionaries.
+    """
+    if hasattr(obj, "to_dict") and callable(obj.to_dict):
+        return obj.to_dict()
+    elif hasattr(obj, "__dict__"):
+        return obj.__dict__
+    elif isinstance(obj, dict):
+        return {key: _convert_to_dict(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_convert_to_dict(item) for item in obj]
+    return obj
+
+
+def _prepare_args_kwargs(args: Tuple[Any, ...], **kwargs: Any) -> dict:
+    """
+    Prepares args and kwargs for JSON serialization by converting objects with to_dict
+    method to dictionaries. Maintains the original argument structure.
+    """
+    processed_args = _convert_to_dict(args)
+    processed_kwargs = _convert_to_dict(kwargs)
+    return {
+        "args": processed_args,
+        **processed_kwargs,  # Unpacks the processed kwargs directly
+    }
+
+
+INPUT_VALUE = SpanAttributes.INPUT_VALUE
+GEN_AI_SPAN_KIND = SpanAttributes.GEN_AI_SPAN_KIND
+OUTPUT_VALUE = SpanAttributes.OUTPUT_VALUE
+OUTPUT_MIME_TYPE = SpanAttributes.OUTPUT_MIME_TYPE
+GEN_AI_USAGE_INPUT_TOKENS = SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS
+GEN_AI_USAGE_OUTPUT_TOKENS = SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
+GEN_AI_USAGE_TOTAL_TOKENS = SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS
