@@ -228,3 +228,102 @@ client = OpenAI(
 
 response = client.chat.completions.create(
     model="deepseek-chat",
+    messages=[
+        {"role": "system", "content": "Output valid JSON only."},
+        {"role": "user", "content": "List 3 programming languages with their main use cases"}
+    ],
+    response_format={"type": "json_object"}
+)
+
+import json
+data = json.loads(response.choices[0].message.content)
+print(data)
+```
+
+## Configuration Options
+
+### TraceConfig
+
+```python
+from fi_instrumentation import TraceConfig
+from traceai_deepseek import DeepSeekInstrumentor
+
+config = TraceConfig(
+    hide_inputs=False,
+    hide_outputs=False,
+)
+
+DeepSeekInstrumentor().instrument(
+    tracer_provider=provider,
+    config=config
+)
+```
+
+## Captured Attributes
+
+### Common Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `fi.span.kind` | "LLM" |
+| `llm.system` | "deepseek" |
+| `llm.provider` | "deepseek" |
+| `llm.model` | Model name (deepseek-chat, deepseek-reasoner, etc.) |
+| `llm.token_count.prompt` | Input token count |
+| `llm.token_count.completion` | Output token count |
+| `llm.token_count.total` | Total token count |
+
+### DeepSeek-Specific Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `deepseek.response_id` | Unique response ID |
+| `deepseek.finish_reason` | Response finish reason (stop, tool_calls, length) |
+| `deepseek.prompt_cache_hit_tokens` | Tokens served from cache |
+| `deepseek.prompt_cache_miss_tokens` | Tokens not in cache |
+| `deepseek.reasoning_tokens` | Tokens used for reasoning (R1 models) |
+| `deepseek.reasoning_content` | Full reasoning text (R1 models) |
+| `deepseek.tool_calls_count` | Number of tool calls |
+| `deepseek.tools_count` | Number of tools provided |
+
+## Available Models
+
+| Model | Description |
+|-------|-------------|
+| `deepseek-chat` | General chat model |
+| `deepseek-coder` | Code-focused model |
+| `deepseek-reasoner` | Reasoning model (R1) with chain-of-thought |
+
+## Prompt Caching
+
+DeepSeek supports prompt caching to reduce costs and latency for repeated prompts. The instrumentation tracks cache hit/miss metrics:
+
+```python
+response = client.chat.completions.create(
+    model="deepseek-chat",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},  # Cached
+        {"role": "user", "content": "Hello!"}
+    ]
+)
+
+# Access cache metrics from usage
+print(f"Cache hits: {response.usage.prompt_cache_hit_tokens}")
+print(f"Cache misses: {response.usage.prompt_cache_miss_tokens}")
+```
+
+## Important Notes
+
+1. **OpenAI SDK Required**: DeepSeek uses the OpenAI-compatible API, so you need the `openai` package installed.
+
+2. **Base URL**: Always set `base_url="https://api.deepseek.com/v1"` when creating the client.
+
+3. **API Key**: Get your API key from the [DeepSeek Platform](https://platform.deepseek.com/).
+
+4. **Selective Instrumentation**: The instrumentor only traces calls to DeepSeek's API. Regular OpenAI API calls are not affected.
+
+5. **R1 Models**: When using `deepseek-reasoner`, the `reasoning_content` field contains the model's thought process before the final answer.
+
+## License
+
+Apache-2.0
