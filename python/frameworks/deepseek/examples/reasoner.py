@@ -76,3 +76,37 @@ def main():
         print("Reasoning Process:")
         print("-" * 40)
         print(message.reasoning_content)
+        print("-" * 40)
+    print(f"\nFinal Answer: {message.content}")
+
+    # Code analysis
+    print("\n" + "=" * 50)
+    print("=== Code Analysis with Reasoning ===")
+    code = """
+def mystery(n):
+    if n <= 1:
+        return n
+    return mystery(n-1) + mystery(n-2)
+"""
+    response = client.chat.completions.create(
+        model="deepseek-reasoner",
+        messages=[
+            {
+                "role": "user",
+                "content": f"Analyze this code and explain what it does. "
+                f"What would mystery(6) return?\n\n```python{code}```",
+            }
+        ],
+    )
+
+    message = response.choices[0].message
+    if hasattr(message, "reasoning_content") and message.reasoning_content:
+        print("Reasoning Process:")
+        print("-" * 40)
+        print(message.reasoning_content)
+        print("-" * 40)
+    print(f"\nFinal Answer: {message.content}")
+
+
+if __name__ == "__main__":
+    main()
