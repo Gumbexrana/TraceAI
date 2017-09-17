@@ -82,3 +82,40 @@ def main():
         {
             "type": "function",
             "function": {
+                "name": "get_weather",
+                "description": "Get the current weather for a location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city name"
+                        }
+                    },
+                    "required": ["location"]
+                }
+            }
+        }
+    ]
+
+    response = client.chat.completions.create(
+        model="deepseek-chat",
+        messages=[
+            {"role": "user", "content": "What's the weather in Tokyo?"}
+        ],
+        tools=tools,
+        tool_choice="auto"
+    )
+
+    message = response.choices[0].message
+    if message.tool_calls:
+        for tool_call in message.tool_calls:
+            print(f"Tool: {tool_call.function.name}")
+            print(f"Arguments: {tool_call.function.arguments}")
+    else:
+        print(f"Response: {message.content}")
+    print()
+
+
+if __name__ == "__main__":
+    main()
