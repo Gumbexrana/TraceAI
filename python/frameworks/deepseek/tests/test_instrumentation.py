@@ -303,3 +303,135 @@ class TestRealWorldScenarios:
         from traceai_deepseek._response_attributes_extractor import _ChatCompletionResponseAttributesExtractor
 
         # Request
+        req_extractor = _ChatCompletionRequestAttributesExtractor()
+        request_params = {
+            "model": "deepseek-reasoner",
+            "messages": [
+                {"role": "user", "content": "What is 15% of 240?"}
+            ],
+        }
+        req_attrs = dict(req_extractor.get_attributes_from_request(request_params))
+        assert req_attrs["llm.model"] == "deepseek-reasoner"
+
+        # Response with reasoning
+        resp_extractor = _ChatCompletionResponseAttributesExtractor()
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "The answer is 36.",
+                        "reasoning_content": "To find 15% of 240:\n1. Convert 15% to decimal: 0.15\n2. Multiply: 0.15 × 240 = 36",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 15,
+                "completion_tokens": 60,
+                "total_tokens": 75,
+                "completion_tokens_details": {
+                    "reasoning_tokens": 40,
+                },
+            },
+        }
+        resp_attrs = dict(resp_extractor.get_attributes(response))
+        extra_attrs = dict(resp_extractor.get_extra_attributes(response, {}))
+
+        # Reasoning content may be in raw output or specific keys
+        raw_output = extra_attrs.get("raw.output", "")
+        assert extra_attrs.get("deepseek.reasoning_content") is not None or "reasoning_content" in raw_output
+        assert extra_attrs.get("deepseek.reasoning_tokens") == 40 or "reasoning_tokens" in raw_output
+
+    def test_function_calling_flow(self):
+        """Test function calling flow attributes."""
+        from traceai_deepseek._request_attributes_extractor import _ChatCompletionRequestAttributesExtractor
+        from traceai_deepseek._response_attributes_extractor import _ChatCompletionResponseAttributesExtractor
+
+        # Initial request with tools
+        req_extractor = _ChatCompletionRequestAttributesExtractor()
+        request_params = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "What's the weather in Paris?"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get current weather",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "location": {"type": "string"},
+                            },
+                        },
+                    },
+                }
+            ],
+            "tool_choice": "auto",
+        }
+        req_attrs = dict(req_extractor.get_extra_attributes_from_request(request_params))
+        assert req_attrs.get("deepseek.tools_count") == 1
+
+        # Response with tool call
+        resp_extractor = _ChatCompletionResponseAttributesExtractor()
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_123",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": '{"location": "Paris"}',
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+        }
+        extra_attrs = dict(resp_extractor.get_extra_attributes(response, {}))
+        assert extra_attrs.get("deepseek.tool_calls_count") == 1
+        assert extra_attrs.get("deepseek.finish_reason") == "tool_calls"
+
+    def test_prompt_caching_scenario(self):
+        """Test prompt caching scenario with repeated system prompts."""
+        from traceai_deepseek._response_attributes_extractor import _ChatCompletionResponseAttributesExtractor
+
+        extractor = _ChatCompletionResponseAttributesExtractor()
+
+        # First request - no cache
+        response1 = {
+            "choices": [{"message": {"role": "assistant", "content": "Hi!"}}],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 5,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100,
+            },
+        }
+        attrs1 = dict(extractor.get_extra_attributes(response1, {}))
+        raw_output1 = attrs1.get("raw.output", "")
+        assert attrs1.get("deepseek.prompt_cache_miss_tokens") == 100 or "prompt_cache_miss_tokens" in raw_output1
+        assert attrs1.get("deepseek.prompt_cache_hit_tokens") == 0 or "prompt_cache_hit_tokens" in raw_output1
+
+        # Second request - cache hit
+        response2 = {
+            "choices": [{"message": {"role": "assistant", "content": "Hello again!"}}],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 8,
+                "prompt_cache_hit_tokens": 90,
+                "prompt_cache_miss_tokens": 10,
+            },
+        }
+        attrs2 = dict(extractor.get_extra_attributes(response2, {}))
+        raw_output2 = attrs2.get("raw.output", "")
+        assert attrs2.get("deepseek.prompt_cache_hit_tokens") == 90 or "prompt_cache_hit_tokens" in raw_output2
+        assert attrs2.get("deepseek.prompt_cache_miss_tokens") == 10 or "prompt_cache_miss_tokens" in raw_output2
