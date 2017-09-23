@@ -128,3 +128,60 @@ def setup_mocks():
     class MockBaseInstrumentor:
         def instrumentation_dependencies(self):
             return []
+
+        def instrument(self, **kwargs):
+            self._instrument(**kwargs)
+
+        def _instrument(self, **kwargs):
+            pass
+
+        def _uninstrument(self, **kwargs):
+            pass
+
+    mock_otel_instr_instrumentor.BaseInstrumentor = MockBaseInstrumentor
+
+    # Register opentelemetry mocks
+    sys.modules["opentelemetry"] = mock_otel
+    sys.modules["opentelemetry.trace"] = mock_trace
+    sys.modules["opentelemetry.context"] = mock_context
+    sys.modules["opentelemetry.util"] = mock_util
+    sys.modules["opentelemetry.util.types"] = mock_util_types
+    sys.modules["opentelemetry.instrumentation"] = mock_otel_instr
+    sys.modules["opentelemetry.instrumentation.instrumentor"] = mock_otel_instr_instrumentor
+
+    # Mock wrapt
+    mock_wrapt = create_mock_module("wrapt")
+    mock_wrapt.wrap_function_wrapper = MagicMock()
+    sys.modules["wrapt"] = mock_wrapt
+
+
+# Set up mocks before tests run
+setup_mocks()
+
+
+@pytest.fixture
+def mock_ollama_client():
+    """Create a mock Ollama client."""
+    mock_client = MagicMock()
+
+    # Mock chat response
+    mock_client.chat.return_value = {
+        "message": {"role": "assistant", "content": "Hello!"},
+        "prompt_eval_count": 10,
+        "eval_count": 5,
+        "total_duration": 1000000000,
+    }
+
+    # Mock generate response
+    mock_client.generate.return_value = {
+        "response": "Generated text",
+        "prompt_eval_count": 5,
+        "eval_count": 10,
+    }
+
+    # Mock embed response
+    mock_client.embed.return_value = {
+        "embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+    }
+
+    return mock_client
