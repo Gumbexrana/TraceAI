@@ -132,3 +132,204 @@ def _get_output_attributes(response: Any) -> Dict[str, AttributeValue]:
                 attributes[f"{prefix}.{MessageAttributes.MESSAGE_ROLE}"] = message.role
             if hasattr(message, "content") and message.content:
                 attributes[f"{prefix}.{MessageAttributes.MESSAGE_CONTENT}"] = message.content
+                attributes[SpanAttributes.OUTPUT_VALUE] = message.content
+
+    # Get usage metrics
+    if hasattr(response, "usage") and response.usage:
+        usage = response.usage
+        if hasattr(usage, "prompt_tokens"):
+            attributes[SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS] = usage.prompt_tokens
+        if hasattr(usage, "completion_tokens"):
+            attributes[SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS] = usage.completion_tokens
+        if hasattr(usage, "total_tokens"):
+            attributes[SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS] = usage.total_tokens
+
+    # Add raw output
+    try:
+        if hasattr(response, "model_dump"):
+            attributes[SpanAttributes.OUTPUT_VALUE] = safe_json_dumps(response.model_dump())
+        elif hasattr(response, "__dict__"):
+            attributes[SpanAttributes.OUTPUT_VALUE] = safe_json_dumps(response.__dict__)
+    except Exception:
+        pass
+
+    return attributes
+
+
+def _get_stream_output_attributes(
+    chunks: list,
+    full_content: str,
+) -> Dict[str, AttributeValue]:
+    """Extract output attributes from streaming response chunks."""
+    attributes: Dict[str, AttributeValue] = {
+        SpanAttributes.OUTPUT_VALUE: full_content,
+        f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.0.{MessageAttributes.MESSAGE_ROLE}": "assistant",
+        f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.0.{MessageAttributes.MESSAGE_CONTENT}": full_content,
+    }
+
+    # Get info from last chunk
+    if chunks:
+        last_chunk = chunks[-1]
+        if hasattr(last_chunk, "model"):
+            attributes[SpanAttributes.GEN_AI_REQUEST_MODEL] = last_chunk.model
+
+        if hasattr(last_chunk, "usage") and last_chunk.usage:
+            usage = last_chunk.usage
+            if hasattr(usage, "prompt_tokens"):
+                attributes[SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS] = usage.prompt_tokens
+            if hasattr(usage, "completion_tokens"):
+                attributes[SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS] = usage.completion_tokens
+            if hasattr(usage, "total_tokens"):
+                attributes[SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS] = usage.total_tokens
+
+    # Add raw output
+    try:
+        attributes[SpanAttributes.OUTPUT_VALUE] = safe_json_dumps([
+            c.model_dump() if hasattr(c, "model_dump") else str(c) for c in chunks
+        ])
+    except Exception:
+        pass
+
+    return attributes
+
+
+class _CompletionsWrapper(_WithTracer):
+    """Wrapper for synchronous chat completions."""
+
+    def __call__(
+        self,
+        wrapped: Any,
+        instance: Any,
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+    ) -> Any:
+        # Check if this is a Fireworks client
+        if not _is_fireworks_client(instance):
+            return wrapped(*args, **kwargs)
+
+        # Extract parameters
+        model = kwargs.get("model", args[0] if args else "unknown")
+        messages = kwargs.get("messages", args[1] if len(args) > 1 else [])
+        stream = kwargs.get("stream", False)
+
+        # Get input attributes - exclude model, messages, stream from kwargs
+        extra_kwargs = {k: v for k, v in kwargs.items() if k not in ("model", "messages", "stream")}
+        input_attrs = _get_input_attributes(model, messages, **extra_kwargs)
+
+        with self._start_span("Fireworks Chat Completions", input_attrs) as span:
+            try:
+                response = wrapped(*args, **kwargs)
+
+                if stream:
+                    return self._wrap_stream(response, span)
+
+                # Non-streaming response
+                output_attrs = _get_output_attributes(response)
+                span.set_attributes(output_attrs)
+                span.set_status(Status(StatusCode.OK))
+                span.end()
+                return response
+
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.end()
+                raise
+
+    def _wrap_stream(self, stream: Any, span: Span) -> Any:
+        """Wrap a streaming response to capture all chunks."""
+        chunks = []
+        full_content = ""
+
+        try:
+            for chunk in stream:
+                chunks.append(chunk)
+                if hasattr(chunk, "choices") and chunk.choices:
+                    choice = chunk.choices[0]
+                    if hasattr(choice, "delta") and hasattr(choice.delta, "content"):
+                        if choice.delta.content:
+                            full_content += choice.delta.content
+                yield chunk
+
+            output_attrs = _get_stream_output_attributes(chunks, full_content)
+            span.set_attributes(output_attrs)
+            span.set_status(Status(StatusCode.OK))
+
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            raise
+
+        finally:
+            span.end()
+
+
+class _AsyncCompletionsWrapper(_WithTracer):
+    """Wrapper for asynchronous chat completions."""
+
+    async def __call__(
+        self,
+        wrapped: Any,
+        instance: Any,
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+    ) -> Any:
+        # Check if this is a Fireworks client
+        if not _is_fireworks_client(instance):
+            return await wrapped(*args, **kwargs)
+
+        # Extract parameters
+        model = kwargs.get("model", args[0] if args else "unknown")
+        messages = kwargs.get("messages", args[1] if len(args) > 1 else [])
+        stream = kwargs.get("stream", False)
+
+        # Get input attributes - exclude model, messages, stream from kwargs
+        extra_kwargs = {k: v for k, v in kwargs.items() if k not in ("model", "messages", "stream")}
+        input_attrs = _get_input_attributes(model, messages, **extra_kwargs)
+
+        with self._start_span("Fireworks Chat Completions", input_attrs) as span:
+            try:
+                response = await wrapped(*args, **kwargs)
+
+                if stream:
+                    return self._wrap_async_stream(response, span)
+
+                # Non-streaming response
+                output_attrs = _get_output_attributes(response)
+                span.set_attributes(output_attrs)
+                span.set_status(Status(StatusCode.OK))
+                span.end()
+                return response
+
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.end()
+                raise
+
+    async def _wrap_async_stream(self, stream: Any, span: Span) -> Any:
+        """Wrap an async streaming response to capture all chunks."""
+        chunks = []
+        full_content = ""
+
+        try:
+            async for chunk in stream:
+                chunks.append(chunk)
+                if hasattr(chunk, "choices") and chunk.choices:
+                    choice = chunk.choices[0]
+                    if hasattr(choice, "delta") and hasattr(choice.delta, "content"):
+                        if choice.delta.content:
+                            full_content += choice.delta.content
+                yield chunk
+
+            output_attrs = _get_stream_output_attributes(chunks, full_content)
+            span.set_attributes(output_attrs)
+            span.set_status(Status(StatusCode.OK))
+
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            raise
+
+        finally:
+            span.end()
