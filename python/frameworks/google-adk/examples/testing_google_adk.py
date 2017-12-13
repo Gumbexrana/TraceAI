@@ -1,0 +1,29 @@
+import asyncio
+
+from google.adk.agents import Agent
+from google.adk.runners import InMemoryRunner
+from google.genai import types
+
+from traceai_google_adk import GoogleADKInstrumentor
+from fi_instrumentation import register
+from fi_instrumentation.fi_types import ProjectType
+
+tracer_provider = register(
+    project_name="test_project",
+    project_type=ProjectType.OBSERVE,
+)
+
+
+
+GoogleADKInstrumentor().instrument(tracer_provider=tracer_provider)
+
+def get_weather(city: str) -> dict:
+    """Retrieves the current weather report for a specified city.
+
+    Args:
+        city (str): The name of the city for which to retrieve the weather report.
+
+    Returns:
+        dict: status and result or error msg.
+    """
+    if city.lower() == "new york":
