@@ -210,3 +210,322 @@ class _RequestAttributesExtractor:
         type_hints = get_type_hints(func)
 
         # Build parameters schema
+        parameters_schema = self._build_parameters_schema(sig, type_hints)
+
+        # Return in Google GenAI Tool format
+        return {
+            "function_declarations": [
+                {
+                    "name": func_name,
+                    "description": func_doc.strip() or f"Function {func_name}",
+                    "parameters": parameters_schema,
+                }
+            ]
+        }
+
+    def _build_parameters_schema(
+        self, sig: inspect.Signature, type_hints: Dict[str, type]
+    ) -> Dict[str, Any]:
+        """Build JSON schema for function parameters."""
+        properties = {}
+        required = []
+
+        for param_name, param in sig.parameters.items():
+            if param_name == "self":
+                continue
+
+            # Determine if parameter is required (no default value)
+            if param.default == inspect.Parameter.empty:
+                required.append(param_name)
+
+            # Get parameter type information
+            param_type = type_hints.get(param_name, str)
+            param_info = {"type": self._python_type_to_json_schema_type(param_type)}
+
+            # Add description from docstring if available
+            param_info["description"] = f"Parameter {param_name}"
+
+            properties[param_name] = param_info
+
+        # Build the schema
+        parameters_schema = {"type": "object", "properties": properties}
+
+        if required:
+            parameters_schema["required"] = required
+
+        return parameters_schema
+
+    def _python_type_to_json_schema_type(self, python_type: type) -> str:
+        """Convert Python type to JSON schema type string."""
+        if python_type is str:
+            return "string"
+        elif python_type is int:
+            return "integer"
+        elif python_type is float:
+            return "number"
+        elif python_type is bool:
+            return "boolean"
+        elif python_type is list:
+            return "array"
+        elif python_type is dict:
+            return "object"
+        else:
+            # Default to string for unknown types
+            return "string"
+
+    def _convert_tool_to_dict(self, tool: Any) -> Dict[str, Any]:
+        """Convert a Tool object to a dictionary representation."""
+        try:
+            # Handle Google GenAI Tool object
+            if hasattr(tool, "function_declarations"):
+                func_declarations = []
+                for func_decl in tool.function_declarations:
+                    if hasattr(func_decl, "model_dump"):
+                        func_declarations.append(func_decl.model_dump(exclude_none=True))
+                    else:
+                        # Manually extract attributes
+                        func_dict = {
+                            "name": getattr(func_decl, "name", None),
+                            "description": getattr(func_decl, "description", None),
+                        }
+
+                        # Handle parameters which might be a Schema object
+                        parameters = getattr(func_decl, "parameters", None)
+                        if parameters is not None:
+                            if hasattr(parameters, "model_dump"):
+                                func_dict["parameters"] = parameters.model_dump(exclude_none=True)
+                            elif hasattr(parameters, "__dict__"):
+                                func_dict["parameters"] = parameters.__dict__
+                            else:
+                                func_dict["parameters"] = parameters
+
+                        # Remove None values
+                        func_dict = {k: v for k, v in func_dict.items() if v is not None}
+                        func_declarations.append(func_dict)
+
+                return {"function_declarations": func_declarations}
+            else:
+                # Fallback: convert all attributes to dict
+                return {k: v for k, v in tool.__dict__.items() if not k.startswith("_")}
+        except Exception:
+            logger.exception(f"Failed to convert tool to dict: {tool}")
+            return {}
+
+    def _get_attributes_from_message_param(
+        self,
+        input_contents: Mapping[str, Any],
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        # https://github.com/googleapis/python-genai/blob/6e55222895a6639d41e54202e3d9a963609a391f/google/genai/models.py#L3890 # noqa: E501
+        if isinstance(input_contents, str):
+            # When provided a string, the GenAI SDK ingests it as
+            # a UserContent object with role "user"
+            # https://googleapis.github.io/python-genai/index.html#provide-a-string
+            yield (MessageAttributes.MESSAGE_CONTENT, input_contents)
+            yield (MessageAttributes.MESSAGE_ROLE, "user")
+        elif isinstance(input_contents, Content) or isinstance(input_contents, UserContent):
+            yield from self._get_attributes_from_content(input_contents)
+        elif isinstance(input_contents, Part):
+            yield from self._get_attributes_from_part(input_contents, 0)
+        else:
+            # TODO: Implement for File, PIL_Image
+            logger.exception(f"Unexpected input contents type: {type(input_contents)}")
+
+    def _get_attributes_from_content(
+        self, content: Content
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        if role := get_attribute(content, "role"):
+            yield (
+                MessageAttributes.MESSAGE_ROLE,
+                role.value if isinstance(role, Enum) else role,
+            )
+        else:
+            yield (
+                MessageAttributes.MESSAGE_ROLE,
+                "user",
+            )
+        # Process parts as separate content items
+        if parts := get_attribute(content, "parts"):
+            yield from self._get_attributes_from_parts(parts)
+
+    def _get_attributes_from_function_call(
+        self, function_call: FunctionCall, tool_call_index: int
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        if name := get_attribute(function_call, "name"):
+            if isinstance(name, str):
+                yield (
+                    MessageAttributes.MESSAGE_TOOL_CALLS
+                    + f".{tool_call_index}."
+                    + ToolCallAttributes.TOOL_CALL_FUNCTION_NAME,
+                    name,
+                )
+        if args := get_attribute(function_call, "args"):
+            yield (
+                MessageAttributes.MESSAGE_TOOL_CALLS
+                + f".{tool_call_index}."
+                + ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON,
+                safe_json_dumps(args),
+            )
+
+        if id := get_attribute(function_call, "id"):
+            yield (
+                MessageAttributes.MESSAGE_TOOL_CALLS
+                + f".{tool_call_index}."
+                + ToolCallAttributes.TOOL_CALL_ID,
+                id,
+            )
+
+    def _get_attributes_from_function_response(
+        self, function_response: FunctionResponse
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        if response := get_attribute(function_response, "response"):
+            yield (MessageAttributes.MESSAGE_CONTENT, safe_json_dumps(response))
+        if id := get_attribute(function_response, "id"):
+            yield (
+                MessageAttributes.MESSAGE_TOOL_CALL_ID,
+                id,
+            )
+
+    def _get_attributes_from_parts(self, parts: list[Part]) -> Iterator[Tuple[str, AttributeValue]]:
+        """Process parts as separate content items under message.contents.{index}"""
+        content_index = 0
+        tool_call_index = 0
+        
+        for part in parts:
+            # Check if this part is a tool call or function response (not a content item)
+            part_attrs = list(self._get_attributes_from_part(part, tool_call_index))
+            has_tool_calls = any(
+                attr.startswith(MessageAttributes.MESSAGE_TOOL_CALLS) 
+                for attr, _ in part_attrs
+            )
+            has_tool_call_id = any(
+                attr == MessageAttributes.MESSAGE_TOOL_CALL_ID 
+                for attr, _ in part_attrs
+            )
+            
+            if has_tool_calls or has_tool_call_id:
+                # Tool calls and function responses are not content items
+                for attr, value in part_attrs:
+                    if attr.startswith(MessageAttributes.MESSAGE_TOOL_CALLS):
+                        tool_call_index = self._extract_tool_call_index(attr) + 1
+                    yield (attr, value)
+            else:
+                # This is a content item (text, image, audio, video)
+                for attr, value in part_attrs:
+                    # Map attributes to messageContent.* format
+                    if attr == MessageAttributes.MESSAGE_CONTENT:
+                        # Text content
+                        yield (
+                            f"{MessageAttributes.MESSAGE_CONTENTS}.{content_index}.{MessageContentAttributes.MESSAGE_CONTENT_TYPE}",
+                            "text",
+                        )
+                        yield (
+                            f"{MessageAttributes.MESSAGE_CONTENTS}.{content_index}.{MessageContentAttributes.MESSAGE_CONTENT_TEXT}",
+                            value,
+                        )
+                    elif attr == MessageContentAttributes.MESSAGE_CONTENT_TYPE:
+                        # Media content type
+                        yield (
+                            f"{MessageAttributes.MESSAGE_CONTENTS}.{content_index}.{MessageContentAttributes.MESSAGE_CONTENT_TYPE}",
+                            value,
+                        )
+                    elif attr in (
+                        MessageContentAttributes.MESSAGE_CONTENT_IMAGE,
+                        MessageContentAttributes.MESSAGE_CONTENT_AUDIO,
+                        MessageContentAttributes.MESSAGE_CONTENT_VIDEO,
+                    ):
+                        # Media content data
+                        yield (
+                            f"{MessageAttributes.MESSAGE_CONTENTS}.{content_index}.{attr}",
+                            value,
+                        )
+                content_index += 1
+
+    def _extract_tool_call_index(self, attr: str) -> int:
+        """Extract tool call index from message tool call attribute key.
+
+        Example: 'message.tool_calls.0.function_name' -> 0
+        """
+        parts = attr.split(".")
+        if len(parts) >= 3 and parts[2].isdigit():
+            return int(parts[2])
+        return 0
+
+    def _get_attributes_from_part(
+        self, part: Part, tool_call_index: int
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        # https://github.com/googleapis/python-genai/blob/main/google/genai/types.py#L566
+        if text := get_attribute(part, "text"):
+            yield (
+                MessageAttributes.MESSAGE_CONTENT,
+                text,
+            )
+        elif inline_data := get_attribute(part, "inline_data"):
+            yield from self._get_attributes_from_inline_data(inline_data)
+        elif file_data := get_attribute(part, "file_data"):
+            yield from self._get_attributes_from_file_data(file_data)
+        elif function_call := get_attribute(part, "function_call"):
+            yield from self._get_attributes_from_function_call(function_call, tool_call_index)
+        elif function_response := get_attribute(part, "function_response"):
+            yield from self._get_attributes_from_function_response(function_response)
+        else:
+            logger.debug(f"Other field types of parts are not supported yet: {part}")
+
+    def _get_attributes_from_inline_data(
+        self, inline_data: Any
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        mime_type = get_attribute(inline_data, "mime_type")
+        data = get_attribute(inline_data, "data")
+
+        if not mime_type or data is None:
+            return
+
+        # Encode data if it's bytes
+        if isinstance(data, bytes):
+            try:
+                data = base64.b64encode(data).decode("utf-8")
+            except Exception:
+                logger.warning("Failed to base64 encode inline data", exc_info=True)
+                return
+
+        # Determine type based on mime_type
+        if mime_type.startswith("image/"):
+            yield (MessageContentAttributes.MESSAGE_CONTENT_IMAGE, data)
+            yield (MessageContentAttributes.MESSAGE_CONTENT_TYPE, "image")
+        elif mime_type.startswith("audio/"):
+            yield (MessageContentAttributes.MESSAGE_CONTENT_AUDIO, data)
+            yield (MessageContentAttributes.MESSAGE_CONTENT_TYPE, "audio")
+        elif mime_type.startswith("video/"):
+            yield (MessageContentAttributes.MESSAGE_CONTENT_VIDEO, data)
+            yield (MessageContentAttributes.MESSAGE_CONTENT_TYPE, "video")
+
+    def _get_attributes_from_file_data(
+        self, file_data: Any
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        mime_type = get_attribute(file_data, "mime_type")
+        file_uri = get_attribute(file_data, "file_uri")
+
+        if not mime_type or not file_uri:
+            return
+
+        if mime_type.startswith("image/"):
+            yield (MessageContentAttributes.MESSAGE_CONTENT_IMAGE, file_uri)
+            yield (MessageContentAttributes.MESSAGE_CONTENT_TYPE, "image")
+        elif mime_type.startswith("audio/"):
+            yield (MessageContentAttributes.MESSAGE_CONTENT_AUDIO, file_uri)
+            yield (MessageContentAttributes.MESSAGE_CONTENT_TYPE, "audio")
+        elif mime_type.startswith("video/"):
+            yield (MessageContentAttributes.MESSAGE_CONTENT_VIDEO, file_uri)
+            yield (MessageContentAttributes.MESSAGE_CONTENT_TYPE, "video")
+
+
+T = TypeVar("T", bound=type)
+
+
+def is_iterable_of(lst: Iterable[object], tp: T) -> bool:
+    return isinstance(lst, Iterable) and all(isinstance(x, tp) for x in lst)
+
+
+def get_attribute(obj: Any, attr_name: str, default: Any = None) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(attr_name, default)
+    return getattr(obj, attr_name, default)
