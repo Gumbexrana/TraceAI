@@ -138,3 +138,214 @@ class _ResponseAccumulator:
         self._values += values
 
     def _result(self) -> Optional[Dict[str, Any]]:
+        if self._is_null:
+            return None
+        return dict(self._values)
+
+
+class _ResponseExtractor:
+    __slots__ = ("_response_accumulator",)
+
+    def __init__(
+        self,
+        response_accumulator: _ResponseAccumulator,
+    ) -> None:
+        self._response_accumulator = response_accumulator
+
+    def get_attributes(self) -> Iterator[Tuple[str, AttributeValue]]:
+        if not (result := self._response_accumulator._result()):
+            return
+        json_string = safe_json_dumps(result)
+        yield from _as_output_attributes(
+            _ValueAndType(json_string, FiMimeTypeValues.JSON)
+        )
+
+    def get_extra_attributes(self) -> Iterator[Tuple[str, AttributeValue]]:
+        if not (result := self._response_accumulator._result()):
+            return
+        if model_version := result.get("model_version"):
+            yield SpanAttributes.GEN_AI_REQUEST_MODEL, model_version
+        if usage_metadata := result.get("usage_metadata"):
+            if prompt_token_count := usage_metadata.get("prompt_token_count"):
+                yield SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS, int(prompt_token_count)
+            if candidates_token_count := usage_metadata.get("candidates_token_count"):
+                yield SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, int(candidates_token_count)
+            if total_token_count := usage_metadata.get("total_token_count"):
+                yield SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS, int(total_token_count)
+        if candidates := result.get("candidates"):
+            for idx, candidate in enumerate(candidates):
+                if content := candidate.get("content"):
+                    if role := content.get("role"):
+                        yield (
+                            f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.{idx}.{MessageAttributes.MESSAGE_ROLE}",
+                            role,
+                        )
+                    if parts := content.get("parts"):
+                        text_parts = []
+                        tool_call_index = 0
+                        for part in parts:
+                            if text := part.get("text"):
+                                text_parts.append(text)
+                            elif function_call := part.get("function_call"):
+                                # Handle function calls in streaming responses
+                                if function_name := function_call.get("name"):
+                                    yield (
+                                        f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.{idx}.{MessageAttributes.MESSAGE_TOOL_CALLS}.{tool_call_index}.{ToolCallAttributes.TOOL_CALL_FUNCTION_NAME}",
+                                        function_name,
+                                    )
+                                if function_args := function_call.get("args"):
+                                    yield (
+                                        f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.{idx}.{MessageAttributes.MESSAGE_TOOL_CALLS}.{tool_call_index}.{ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON}",
+                                        safe_json_dumps(function_args),
+                                    )
+                                tool_call_index += 1
+                        if text_parts:
+                            yield (
+                                f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.{idx}.{MessageAttributes.MESSAGE_CONTENT}",
+                                "".join(text_parts),
+                            )
+
+
+class _ValuesAccumulator:
+    __slots__ = ("_values",)
+
+    def __init__(self, **values: Any) -> None:
+        self._values: Dict[str, Any] = values
+
+    def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        for key, value in self._values.items():
+            if value is None:
+                continue
+            if isinstance(value, _ValuesAccumulator):
+                if dict_value := dict(value):
+                    yield key, dict_value
+            elif isinstance(value, _SimpleStringReplace):
+                if str_value := str(value):
+                    yield key, str_value
+            elif isinstance(value, _StringAccumulator):
+                if str_value := str(value):
+                    yield key, str_value
+            elif isinstance(value, _IndexedAccumulator):
+                yield key, list(value)
+            elif isinstance(value, _DictReplace):
+                if dict_value := dict(value):
+                    yield key, dict_value
+            else:
+                yield key, value
+
+    def __iadd__(self, values: Optional[Mapping[str, Any]]) -> "_ValuesAccumulator":
+        if not values:
+            return self
+        for key in self._values.keys():
+            if (value := values.get(key)) is None:
+                continue
+            self_value = self._values[key]
+            if isinstance(self_value, _ValuesAccumulator):
+                if isinstance(value, Mapping):
+                    self_value += value
+            elif isinstance(self_value, _StringAccumulator):
+                if isinstance(value, str):
+                    self_value += value
+            elif isinstance(self_value, _SimpleStringReplace):
+                if isinstance(value, str):
+                    self_value += value
+            elif isinstance(self_value, _IndexedAccumulator):
+                self_value += value
+            elif isinstance(self_value, _DictReplace):
+                if isinstance(value, Mapping):
+                    self_value += value
+            elif isinstance(self_value, List) and isinstance(value, Iterable):
+                self_value.extend(value)
+            else:
+                self._values[key] = value  # replacement
+        for key in values.keys():
+            if key in self._values or (value := values[key]) is None:
+                continue
+            value = deepcopy(value)
+            if isinstance(value, Mapping):
+                value = _ValuesAccumulator(**value)
+            self._values[key] = value  # new entry
+        return self
+
+
+class _StringAccumulator:
+    __slots__ = ("_fragments",)
+
+    def __init__(self) -> None:
+        self._fragments: List[str] = []
+
+    def __str__(self) -> str:
+        return "".join(self._fragments)
+
+    def __iadd__(self, value: Optional[str]) -> "_StringAccumulator":
+        if not value:
+            return self
+        # If the value is a list of strings, extend with all of them
+        if isinstance(value, list):
+            self._fragments.extend(value)
+        # If the value is a dict with a text field, add just the text
+        elif isinstance(value, dict) and "text" in value:
+            self._fragments.append(value["text"])
+        # Otherwise treat as a string
+        else:
+            self._fragments.append(str(value))
+        return self
+
+
+class _IndexedAccumulator:
+    __slots__ = ("_indexed",)
+
+    def __init__(self, factory: Callable[[], _ValuesAccumulator]) -> None:
+        self._indexed: DefaultDict[int, _ValuesAccumulator] = defaultdict(factory)
+
+    def __iter__(self) -> Iterator[Dict[str, Any]]:
+        for _, values in sorted(self._indexed.items()):
+            yield dict(values)
+
+    def __iadd__(
+        self, values: Optional[Union[Mapping[str, Any], List[Any]]]
+    ) -> "_IndexedAccumulator":
+        if not values:
+            return self
+        if isinstance(values, Mapping):
+            values = [values]
+        for v in values:
+            if v and hasattr(v, "get"):
+                self._indexed[v.get("index") or 0] += v
+        return self
+
+
+class _SimpleStringReplace:
+    __slots__ = ("_str_val",)
+
+    def __init__(self) -> None:
+        self._str_val: str = ""
+
+    def __str__(self) -> str:
+        return self._str_val
+
+    def __iadd__(self, value: Optional[str]) -> "_SimpleStringReplace":
+        if not value:
+            return self
+        self._str_val = value
+        return self
+
+
+class _DictReplace:
+    __slots__ = ("_val",)
+
+    def __init__(self) -> None:
+        self._val: Optional[Dict[Any, Any]] = None
+
+    def __iter__(self) -> Iterator[Tuple[Any, Any]]:
+        if self._val is not None:
+            yield from self._val.items()
+
+    def __iadd__(self, value: Optional[Mapping[Any, Any]]) -> "_DictReplace":
+        if not value:
+            return self
+        if self._val is None:
+            self._val = dict(value)  # First chunk
+        else:
+            self._val.update(value)  # Merge subsequent chunks
+        return self
