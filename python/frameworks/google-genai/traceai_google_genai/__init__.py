@@ -38,3 +38,64 @@ class GoogleGenAIInstrumentor(BaseInstrumentor):  # type: ignore
             assert isinstance(config, TraceConfig)
         self._tracer = FITracer(
             get_tracer(__name__, __version__, tracer_provider),
+            config=config,
+        )
+
+        try:
+            from google.genai.models import AsyncModels, Models
+        except ImportError as err:
+            raise Exception(
+                "Could not import google-genai. Please install with `pip install google-genai`."
+            ) from err
+
+        from traceai_google_genai._wrappers import (
+            _AsyncGenerateContentStream,
+            _AsyncGenerateContentWrapper,
+            _SyncGenerateContent,
+            _SyncGenerateContentStream,
+        )
+
+        self._original_generate_content = Models.generate_content
+        wrap_function_wrapper(
+            module="google.genai.models",
+            name="Models.generate_content",
+            wrapper=_SyncGenerateContent(tracer=self._tracer),
+        )
+
+        self._original_async_generate_content = AsyncModels.generate_content
+        wrap_function_wrapper(
+            module="google.genai.models",
+            name="AsyncModels.generate_content",
+            wrapper=_AsyncGenerateContentWrapper(tracer=self._tracer),
+        )
+
+        self._original_generate_content_stream = Models.generate_content_stream
+        wrap_function_wrapper(
+            module="google.genai.models",
+            name="Models.generate_content_stream",
+            wrapper=_SyncGenerateContentStream(tracer=self._tracer),
+        )
+
+        self._original_async_generate_content_stream = AsyncModels.generate_content_stream
+        wrap_function_wrapper(
+            module="google.genai.models",
+            name="AsyncModels.generate_content_stream",
+            wrapper=_AsyncGenerateContentStream(tracer=self._tracer),
+        )
+
+    def _uninstrument(self, **kwargs: Any) -> None:
+        from google.genai.models import AsyncModels, Models
+
+        if self._original_generate_content is not None:
+            setattr(Models, "generate_content", self._original_generate_content)
+
+        if self._original_async_generate_content is not None:
+            setattr(AsyncModels, "generate_content", self._original_async_generate_content)
+
+        if self._original_generate_content_stream is not None:
+            setattr(Models, "generate_content_stream", self._original_generate_content_stream)
+
+        if self._original_async_generate_content_stream is not None:
+            setattr(
+                AsyncModels, "generate_content_stream", self._original_async_generate_content_stream
+            )
