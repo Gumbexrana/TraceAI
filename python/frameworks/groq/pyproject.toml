@@ -6,3 +6,15 @@ authors = ["Future AGI <no-reply@futureagi.com>"]
 readme = "README.md"
 
 packages = [
+    { include = "traceai_groq" },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.14"
+groq = ">=0.9.0"
+fi-instrumentation-otel = ">=0.1.11"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
