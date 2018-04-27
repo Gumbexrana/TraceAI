@@ -282,3 +282,126 @@ class _PromptCallableWrapper(_WithTracer):
 class _ParseCallableWrapper(_WithTracer):
     def __call__(
         self,
+        wrapped: Callable[..., Any],
+        instance: Any,
+        args: Tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if context_api.get_value(context_api._SUPPRESS_INSTRUMENTATION_KEY):
+            return wrapped(*args, **kwargs)
+
+        if instance:
+            span_name = f"{instance.__class__.__name__}.{wrapped.__name__}"
+        else:
+            span_name = wrapped.__name__
+        with self._tracer.start_as_current_span(
+            span_name,
+            attributes=dict(
+                _flatten(
+                    {
+                        GEN_AI_SPAN_KIND: GUARDRAIL,
+                        INPUT_VALUE: _get_input_value(
+                            wrapped,
+                            *args,
+                            **kwargs,
+                        ),
+                        INPUT_VALUE: _get_raw_input(
+                            args,
+                            **kwargs,
+                        ),
+                    }
+                )
+            ),
+        ) as span:
+            span.set_attributes(dict(get_attributes_from_context()))
+            try:
+                response = wrapped(*args, **kwargs)
+                span.set_attribute(OUTPUT_VALUE, _get_raw_output(response))
+            except Exception as exception:
+                span.set_status(
+                    trace_api.Status(trace_api.StatusCode.ERROR, str(exception))
+                )
+                span.record_exception(exception)
+                raise
+            span.set_status(trace_api.StatusCode.OK)
+        return response
+
+
+class _PostValidationWrapper(_WithTracer):
+    def __call__(
+        self,
+        wrapped: Callable[..., Any],
+        instance: Any,
+        args: Tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if context_api.get_value(context_api._SUPPRESS_INSTRUMENTATION_KEY):
+            return wrapped(*args, **kwargs)
+
+        if instance:
+            span_name = f"{instance.__class__.__name__}.{wrapped.__name__}"
+        else:
+            span_name = wrapped.__name__
+        with self._tracer.start_as_current_span(
+            span_name,
+            attributes=dict(
+                _flatten(
+                    {
+                        INPUT_VALUE: _get_raw_input(args, **kwargs),
+                    }
+                )
+            ),
+        ) as span:
+            span.set_attributes(dict(get_attributes_from_context()))
+            try:
+                validator = args[0]
+                span.set_attribute("validator_name", validator.rail_alias)
+                span.set_attribute(
+                    "validator_on_fail", validator.on_fail_descriptor.name
+                )
+
+                validation_result = args[2]
+                if validator.rail_alias == "fi/dataset_embeddings":
+                    span.set_attribute(
+                        INPUT_VALUE,
+                        (
+                            validation_result.metadata.get("user_message")
+                            if validation_result.metadata
+                            else ""
+                        ),
+                    )
+                span.set_attribute(OUTPUT_VALUE, validation_result.outcome)
+                span.set_attributes(
+                    dict(
+                        _flatten(
+                            (
+                                validation_result.metadata
+                                if validation_result.metadata
+                                else {}
+                            ),
+                        )
+                    )
+                )
+                response = wrapped(*args, **kwargs)
+                span.set_attribute(OUTPUT_VALUE, _get_raw_output(response))
+            except Exception as exception:
+                span.set_status(
+                    trace_api.Status(trace_api.StatusCode.ERROR, str(exception))
+                )
+                span.record_exception(exception)
+                raise
+            span.set_status(trace_api.StatusCode.OK)
+        return response
+
+
+INPUT_VALUE = SpanAttributes.INPUT_VALUE
+GEN_AI_SPAN_KIND = SpanAttributes.FI_SPAN_KIND
+OUTPUT_VALUE = SpanAttributes.OUTPUT_VALUE
+GUARDRAIL = FiSpanKindValues.GUARDRAIL
+LLM = FiSpanKindValues.LLM
+GEN_AI_INPUT_MESSAGES = SpanAttributes.LLM_INPUT_MESSAGES
+GEN_AI_OUTPUT_MESSAGES = SpanAttributes.LLM_OUTPUT_MESSAGES
+PROMPT_TOKENS = SpanAttributes.LLM_TOKEN_COUNT_PROMPT
+COMPLETION_TOKENS = SpanAttributes.LLM_TOKEN_COUNT_COMPLETION
+MESSAGE_CONTENT = MessageAttributes.MESSAGE_CONTENT
+MESSAGE_ROLE = MessageAttributes.MESSAGE_ROLE
