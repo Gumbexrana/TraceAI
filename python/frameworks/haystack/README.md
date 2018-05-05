@@ -78,3 +78,38 @@ text_embedder = SentenceTransformersTextEmbedder(
 
 retriever = InMemoryEmbeddingRetriever(document_store)
 
+template = """
+Given the following information, answer the question.
+
+Context:
+{% for document in documents %}
+    {{ document.content }}
+{% endfor %}
+
+Question: {{question}}
+Answer:
+"""
+
+prompt_builder = PromptBuilder(template=template)
+
+generator = OpenAIGenerator(model="gpt-3.5-turbo")
+
+basic_rag_pipeline = Pipeline()
+basic_rag_pipeline.add_component("text_embedder", text_embedder)
+basic_rag_pipeline.add_component("retriever", retriever)
+basic_rag_pipeline.add_component("prompt_builder", prompt_builder)
+basic_rag_pipeline.add_component("llm", generator)
+
+basic_rag_pipeline.connect("text_embedder.embedding", "retriever.query_embedding")
+basic_rag_pipeline.connect("retriever", "prompt_builder.documents")
+basic_rag_pipeline.connect("prompt_builder", "llm")
+
+question = "What does Rhodes Statue look like?"
+
+response = basic_rag_pipeline.run(
+    {"text_embedder": {"text": question}, "prompt_builder": {"question": question}}
+)
+
+print(response["llm"]["replies"][0])
+```
+
