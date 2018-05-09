@@ -105,3 +105,49 @@ routes = [
     {
         "condition": "{{'no_answer' in replies[0]}}",
         "output": "{{query}}",
+        "output_name": "go_to_websearch",
+        "output_type": str,
+    },
+    {
+        "condition": "{{'no_answer' not in replies[0]}}",
+        "output": "{{replies[0]}}",
+        "output_name": "answer",
+        "output_type": str,
+    },
+]
+
+router = ConditionalRouter(routes)
+
+
+pipe = Pipeline()
+pipe.add_component("prompt_builder", prompt_builder)
+pipe.add_component("llm", llm)
+pipe.add_component("router", router)
+pipe.add_component("websearch", websearch)
+pipe.add_component("prompt_builder_for_websearch", prompt_builder_for_websearch)
+pipe.add_component("llm_for_websearch", llm_for_websearch)
+
+pipe.connect("prompt_builder", "llm")
+pipe.connect("llm.replies", "router.replies")
+pipe.connect("router.go_to_websearch", "websearch.query")
+pipe.connect("router.go_to_websearch", "prompt_builder_for_websearch.query")
+pipe.connect("websearch.documents", "prompt_builder_for_websearch.documents")
+pipe.connect("prompt_builder_for_websearch", "llm_for_websearch")
+
+
+query = "Where is Munich?"
+result = pipe.run(
+    {
+        "prompt_builder": {"query": query, "documents": documents},
+        "router": {"query": query},
+    }
+)
+
+
+query = "How many people live in Munich?"
+result = pipe.run(
+    {
+        "prompt_builder": {"query": query, "documents": documents},
+        "router": {"query": query},
+    }
+)
