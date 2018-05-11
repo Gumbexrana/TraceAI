@@ -45,3 +45,24 @@ pipe = Pipeline()
 pipe.add_component("ranker", ranker)
 response = pipe.run(
     {
+        "ranker": {
+            "query": "Who won the World Cup in 2022?",
+            "documents": [
+                Document(
+                    content="Paul Graham is the founder of Y Combinator.",
+                ),
+                Document(
+                    content=(
+                        "Lionel Messi, captain of the Argentinian national team, "
+                        " won his first World Cup in 2022."
+                    ),
+                ),
+                Document(
+                    content="France lost the 2022 World Cup.",
+                ),  # Cohere consistently ranks this document last
+            ],
+            "top_k": 2,
+        }
+    }
+)
+print(f"{response=}")
