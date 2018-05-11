@@ -63,3 +63,31 @@ if __name__ == "__main__":
         instance=InMemoryBM25Retriever(document_store=document_store),
         name="retriever",
     )
+    query = "Haystack installation"
+    pipeline.run(
+        data={
+            "retriever": {
+                "query": query,
+                "filters": {"field": "meta.version", "operator": ">", "value": 1.21},
+            }
+        }
+    )
+    query = "Haystack installation"
+    pipeline.run(
+        data={
+            "retriever": {
+                "query": query,
+                "filters": {
+                    "operator": "AND",
+                    "conditions": [
+                        {"field": "meta.version", "operator": ">", "value": 1.21},
+                        {
+                            "field": "meta.date",
+                            "operator": ">",
+                            "value": datetime(2023, 11, 7),
+                        },
+                    ],
+                },
+            }
+        }
+    )
