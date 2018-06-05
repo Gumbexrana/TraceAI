@@ -70,3 +70,34 @@ llm = OpenAIChatGenerator(model="gpt-4o")
 pipe = Pipeline()
 pipe.add_component("llm", llm)
 response = pipe.run(
+    {"llm": {"messages": messages, "generation_kwargs": {"tools": tools}}}
+)
+response_msg = response["llm"]["replies"][0]
+messages.append(response_msg)
+weather_response = [
+    {
+        "id": "response_uhGNifLfopt5JrCUxXw1L3zo",
+        "status": "success",
+        "function": {
+            "name": "get_current_weather",
+            "arguments": {"location": "Berlin", "format": "celsius"},
+        },
+        "data": {
+            "location": "Berlin",
+            "temperature": 18,
+            "weather_condition": "Partly Cloudy",
+            "humidity": "60%",
+            "wind_speed": "15 km/h",
+            "observation_time": "2024-03-05T14:00:00Z",
+        },
+    }
+]
+messages.append(
+    ChatMessage.from_function(
+        content=json.dumps(weather_response), name="get_current_weather"
+    )
+)
+response = pipe.run(
+    {"llm": {"messages": messages, "generation_kwargs": {"tools": tools}}}
+)
+print(f'{response["llm"]["replies"][0]=}')
