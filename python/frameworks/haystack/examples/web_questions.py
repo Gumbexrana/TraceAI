@@ -49,3 +49,25 @@ According to the contents of this website:
 {% endfor %}
 Answer the given question: {{query}}
 Answer:
+"""
+prompt_builder = PromptBuilder(template=prompt_template)
+llm = OpenAIGenerator()
+
+pipeline = Pipeline()
+pipeline.add_component("fetcher", fetcher)
+pipeline.add_component("converter", converter)
+pipeline.add_component("prompt", prompt_builder)
+pipeline.add_component("llm", llm)
+
+pipeline.connect("fetcher.streams", "converter.sources")
+pipeline.connect("converter.documents", "prompt.documents")
+pipeline.connect("prompt.prompt", "llm.prompt")
+
+result = pipeline.run(
+    {
+        "fetcher": {"urls": ["https://haystack.deepset.ai/overview/quick-start"]},
+        "prompt": {"query": "Which components do I need for a RAG pipeline?"},
+    }
+)
+
+print(result["llm"]["replies"][0])
