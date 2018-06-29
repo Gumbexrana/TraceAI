@@ -45,3 +45,74 @@ def main():
     print(f"First 5 values: {embedding[:5]}")
 
     # Semantic similarity
+    print("\n=== Semantic Similarity ===")
+    sentences = [
+        "The cat sat on the mat.",
+        "A feline rested on a rug.",
+        "The weather is sunny today.",
+    ]
+
+    embeddings = []
+    for sentence in sentences:
+        emb = client.feature_extraction(
+            text=sentence,
+            model="sentence-transformers/all-MiniLM-L6-v2",
+        )
+        if hasattr(emb, "tolist"):
+            emb = emb.tolist()
+        if isinstance(emb[0], list):
+            emb = emb[0]
+        embeddings.append(emb)
+        print(f"Embedded: {sentence}")
+
+    print("\nSimilarities:")
+    for i in range(len(sentences)):
+        for j in range(i + 1, len(sentences)):
+            sim = cosine_similarity(embeddings[i], embeddings[j])
+            print(f"  {sim:.4f}: '{sentences[i][:30]}...' vs '{sentences[j][:30]}...'")
+
+    # Semantic search
+    print("\n=== Semantic Search ===")
+    documents = [
+        "Python is a popular programming language.",
+        "Machine learning enables pattern recognition.",
+        "The Eiffel Tower stands in Paris.",
+        "Neural networks power modern AI systems.",
+    ]
+
+    doc_embeddings = []
+    for doc in documents:
+        emb = client.feature_extraction(
+            text=doc,
+            model="sentence-transformers/all-MiniLM-L6-v2",
+        )
+        if hasattr(emb, "tolist"):
+            emb = emb.tolist()
+        if isinstance(emb[0], list):
+            emb = emb[0]
+        doc_embeddings.append(emb)
+
+    query = "What is artificial intelligence?"
+    query_emb = client.feature_extraction(
+        text=query,
+        model="sentence-transformers/all-MiniLM-L6-v2",
+    )
+    if hasattr(query_emb, "tolist"):
+        query_emb = query_emb.tolist()
+    if isinstance(query_emb[0], list):
+        query_emb = query_emb[0]
+
+    print(f"Query: {query}")
+    print("Results:")
+    similarities = []
+    for i, doc_emb in enumerate(doc_embeddings):
+        sim = cosine_similarity(query_emb, doc_emb)
+        similarities.append((sim, documents[i]))
+
+    similarities.sort(reverse=True)
+    for sim, doc in similarities:
+        print(f"  {sim:.4f}: {doc}")
+
+
+if __name__ == "__main__":
+    main()
