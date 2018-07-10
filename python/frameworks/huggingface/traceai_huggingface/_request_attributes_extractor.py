@@ -127,3 +127,59 @@ class _ChatCompletionRequestAttributesExtractor:
 
         # Tool choice
         if "tool_choice" in request_parameters:
+            yield "huggingface.tool_choice", str(request_parameters.get("tool_choice", ""))
+
+    def _extract_invocation_parameters(
+        self, request_parameters: Mapping[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract model invocation parameters."""
+        params = {}
+        param_keys = [
+            "temperature", "max_tokens", "top_p", "top_k",
+            "repetition_penalty", "stop", "seed",
+            "frequency_penalty", "presence_penalty",
+            "stream", "n", "logprobs", "top_logprobs",
+        ]
+        for key in param_keys:
+            if key in request_parameters:
+                params[key] = request_parameters[key]
+        return params
+
+
+class _FeatureExtractionRequestAttributesExtractor:
+    """Extract span attributes from HuggingFace feature_extraction (embeddings) request."""
+
+    def get_attributes_from_request(
+        self, request_parameters: Mapping[str, Any]
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        """Extract primary attributes from request."""
+        yield SpanAttributes.GEN_AI_SPAN_KIND, FiSpanKindValues.EMBEDDING.value
+        yield SpanAttributes.GEN_AI_PROVIDER_NAME, "huggingface"
+        yield SpanAttributes.GEN_AI_PROVIDER_NAME, "huggingface"
+
+        model = request_parameters.get("model", "")
+        if model:
+            yield SpanAttributes.EMBEDDING_MODEL_NAME, model
+
+        yield SpanAttributes.INPUT_MIME_TYPE, FiMimeTypeValues.JSON.value
+        yield SpanAttributes.OUTPUT_MIME_TYPE, FiMimeTypeValues.JSON.value
+
+        # Normalize option
+        if "normalize" in request_parameters:
+            yield "huggingface.normalize", request_parameters.get("normalize")
+
+        # Truncate option
+        if "truncate" in request_parameters:
+            yield "huggingface.truncate", request_parameters.get("truncate")
+
+    def get_extra_attributes_from_request(
+        self, request_parameters: Mapping[str, Any]
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        """Extract extra attributes."""
+        text = request_parameters.get("text", "")
+        if isinstance(text, list):
+            yield SpanAttributes.INPUT_VALUE, safe_json_dumps(text[:5])  # Limit to 5
+            yield "huggingface.texts_count", len(text)
+        elif text:
+            yield SpanAttributes.INPUT_VALUE, str(text)
+            yield "huggingface.texts_count", 1
