@@ -178,3 +178,81 @@ class _ChatCompletionResponseAttributesExtractor:
                         if hasattr(tc, "function"):
                             func = tc.function
                             if hasattr(func, "name"):
+                                yield f"huggingface.choices.{i}.tool_calls.{j}.name", func.name
+                            if hasattr(func, "arguments"):
+                                yield f"huggingface.choices.{i}.tool_calls.{j}.arguments", func.arguments
+                        elif isinstance(tc, dict):
+                            func = tc.get("function", {})
+                            yield f"huggingface.choices.{i}.tool_calls.{j}.name", func.get("name", "")
+                            yield f"huggingface.choices.{i}.tool_calls.{j}.arguments", func.get("arguments", "")
+
+            # Finish reason
+            finish_reason = None
+            if hasattr(choice, "finish_reason"):
+                finish_reason = choice.finish_reason
+            elif isinstance(choice, dict):
+                finish_reason = choice.get("finish_reason")
+
+            if finish_reason:
+                yield f"huggingface.choices.{i}.finish_reason", str(finish_reason)
+
+        # Raw response
+        if isinstance(response, dict):
+            yield SpanAttributes.OUTPUT_VALUE, safe_json_dumps(response)
+        elif hasattr(response, "model_dump"):
+            yield SpanAttributes.OUTPUT_VALUE, safe_json_dumps(response.model_dump())
+        elif hasattr(response, "__dict__"):
+            yield SpanAttributes.OUTPUT_VALUE, safe_json_dumps(response.__dict__)
+
+
+class _FeatureExtractionResponseAttributesExtractor:
+    """Extract span attributes from HuggingFace feature_extraction response."""
+
+    def get_attributes(
+        self,
+        response: Optional[Any],
+        is_streaming: bool = False,
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        """Extract primary attributes from response."""
+        if response is None:
+            return
+        # Feature extraction doesn't typically return token counts
+
+    def get_extra_attributes(
+        self,
+        response: Optional[Any],
+        request_parameters: Mapping[str, Any],
+        is_streaming: bool = False,
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        """Extract extra attributes."""
+        if response is None:
+            return
+
+        # Response is typically a list of embeddings (nested lists)
+        embeddings = response
+        if isinstance(embeddings, list):
+            # Check if it's a single embedding or multiple
+            if embeddings and isinstance(embeddings[0], (list, tuple)):
+                # Multiple embeddings or single embedding with multiple dimensions
+                if embeddings[0] and isinstance(embeddings[0][0], (int, float)):
+                    # Single text input: [[dim1, dim2, ...]]
+                    yield "huggingface.embeddings_count", 1
+                    yield "huggingface.embedding_dimensions", len(embeddings[0])
+                    yield f"{SpanAttributes.EMBEDDING_EMBEDDINGS}.0.{EmbeddingAttributes.EMBEDDING_VECTOR}", safe_json_dumps(embeddings[0][:10])
+                elif embeddings[0] and isinstance(embeddings[0][0], list):
+                    # Multiple text inputs: [[[dim1, dim2, ...]], [[dim1, dim2, ...]]]
+                    yield "huggingface.embeddings_count", len(embeddings)
+                    if embeddings[0][0]:
+                        yield "huggingface.embedding_dimensions", len(embeddings[0][0])
+                        yield f"{SpanAttributes.EMBEDDING_EMBEDDINGS}.0.{EmbeddingAttributes.EMBEDDING_VECTOR}", safe_json_dumps(embeddings[0][0][:10])
+            elif embeddings and isinstance(embeddings[0], (int, float)):
+                # Single dimension list
+                yield "huggingface.embeddings_count", 1
+                yield "huggingface.embedding_dimensions", len(embeddings)
+                yield f"{SpanAttributes.EMBEDDING_EMBEDDINGS}.0.{EmbeddingAttributes.EMBEDDING_VECTOR}", safe_json_dumps(embeddings[:10])
+
+            yield SpanAttributes.OUTPUT_VALUE, f"[embeddings generated]"
+        else:
+            yield SpanAttributes.OUTPUT_VALUE, str(response)[:500]
+
+        yield SpanAttributes.OUTPUT_VALUE, safe_json_dumps({"type": "embedding", "shape": str(type(response))})
