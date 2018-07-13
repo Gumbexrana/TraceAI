@@ -42,3 +42,23 @@ def _flatten(
                     yield from _flatten(item, f"{full_key}.{i}")
             else:
                 yield full_key, safe_json_dumps(value)
+        else:
+            yield full_key, value
+
+
+def _finish_tracing(
+    status: trace_api.Status,
+    with_span: _WithSpan,
+    attributes: Optional[Iterator[Tuple[str, AttributeValue]]] = None,
+    extra_attributes: Optional[Iterator[Tuple[str, AttributeValue]]] = None,
+) -> None:
+    """Finish tracing with status and attributes."""
+    if attributes:
+        for key, value in attributes:
+            if value is not None:
+                with_span._span.set_attribute(key, value)
+    if extra_attributes:
+        for key, value in extra_attributes:
+            if value is not None:
+                with_span._span.set_attribute(key, value)
+    with_span.finish_tracing(status=status)
