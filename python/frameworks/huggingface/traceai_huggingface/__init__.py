@@ -110,3 +110,51 @@ class HuggingFaceInstrumentor(BaseInstrumentor):
 
             # Async chat completion
             if hasattr(huggingface_hub.AsyncInferenceClient, "chat_completion"):
+                self._original_async_chat_completion = huggingface_hub.AsyncInferenceClient.chat_completion
+                wrap_function_wrapper(
+                    module="huggingface_hub",
+                    name="AsyncInferenceClient.chat_completion",
+                    wrapper=_AsyncChatCompletionWrapper(tracer=self._tracer),
+                )
+
+            # Async feature extraction
+            if hasattr(huggingface_hub.AsyncInferenceClient, "feature_extraction"):
+                self._original_async_feature_extraction = huggingface_hub.AsyncInferenceClient.feature_extraction
+                wrap_function_wrapper(
+                    module="huggingface_hub",
+                    name="AsyncInferenceClient.feature_extraction",
+                    wrapper=_AsyncFeatureExtractionWrapper(tracer=self._tracer),
+                )
+
+        # Wrap Protect if available
+        if Protect is not None:
+            self._original_protect = Protect.protect
+            wrap_function_wrapper(
+                module="fi.evals",
+                name="Protect.protect",
+                wrapper=GuardrailProtectWrapper(tracer=self._tracer),
+            )
+        else:
+            self._original_protect = None
+
+    def _uninstrument(self, **kwargs: Any) -> None:
+        try:
+            huggingface_hub = import_module("huggingface_hub")
+        except ImportError:
+            return
+
+        if hasattr(huggingface_hub, "InferenceClient"):
+            if hasattr(self, "_original_text_generation"):
+                huggingface_hub.InferenceClient.text_generation = self._original_text_generation
+            if hasattr(self, "_original_chat_completion"):
+                huggingface_hub.InferenceClient.chat_completion = self._original_chat_completion
+            if hasattr(self, "_original_feature_extraction"):
+                huggingface_hub.InferenceClient.feature_extraction = self._original_feature_extraction
+
+        if hasattr(huggingface_hub, "AsyncInferenceClient"):
+            if hasattr(self, "_original_async_text_generation"):
+                huggingface_hub.AsyncInferenceClient.text_generation = self._original_async_text_generation
+            if hasattr(self, "_original_async_chat_completion"):
+                huggingface_hub.AsyncInferenceClient.chat_completion = self._original_async_chat_completion
+            if hasattr(self, "_original_async_feature_extraction"):
+                huggingface_hub.AsyncInferenceClient.feature_extraction = self._original_async_feature_extraction
