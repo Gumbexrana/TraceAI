@@ -53,3 +53,27 @@ Set up your Instructor client with built-in observability.
 import instructor
 from openai import OpenAI
 from pydantic import BaseModel
+
+# Define the output structure
+class UserInfo(BaseModel):
+    name: str
+    age: int
+
+# Patch the OpenAI client
+client = instructor.patch(client=OpenAI())
+
+user_info = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    response_model=UserInfo,
+    messages=[
+        {
+            "role": "system",
+            "content": "Extract the name and age from the text and return them in a structured format.",
+        },
+        {"role": "user", "content": "John Doe is nine years old."},
+    ],
+)
+
+print(user_info, type(user_info))
+```
+
