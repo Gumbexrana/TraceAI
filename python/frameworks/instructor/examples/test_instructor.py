@@ -51,3 +51,26 @@ class User(BaseModel):
     age: int
     addresses: List[Address]
 
+
+# Initialize with API key
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Enable instructor patches for OpenAI client
+client = instructor.from_openai(client)
+# Create structured output with nested objects
+user = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[
+        {
+            "role": "user",
+            "content": """
+            Extract: Jason is 25 years old.
+            He lives at 123 Main St, New York, USA
+            and has a summer house at 456 Beach Rd, Miami, USA
+        """,
+        },
+    ],
+    response_model=User,
+)
+
+# print(user)
