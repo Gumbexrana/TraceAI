@@ -103,3 +103,161 @@ class _PatchWrapper:
         )
 
         if inspect.iscoroutinefunction(wrapped):
+
+            async def wrapper():
+                with self._tracer.start_as_current_span(
+                    span_name,
+                    attributes=attributes,
+                    record_exception=False,
+                    set_status_on_exception=False,
+                ) as span:
+                    try:
+                        resp = await wrapped(*args, **kwargs)
+                        if resp:
+                            span.set_attribute(OUTPUT_VALUE, safe_json_dumps(resp))
+                            span.set_attribute(OUTPUT_MIME_TYPE, "application/json")
+                            span.set_attribute(OUTPUT_VALUE, _raw_output(resp))
+                        span.set_status(trace_api.StatusCode.OK)
+                        return resp
+                    except Exception as e:
+                        span.set_status(
+                            trace_api.Status(trace_api.StatusCode.ERROR, str(e))
+                        )
+                        span.record_exception(e)
+                        raise
+
+            return wrapper()
+        else:
+            with self._tracer.start_as_current_span(
+                span_name,
+                attributes=attributes,
+                record_exception=False,
+                set_status_on_exception=False,
+            ) as span:
+                try:
+                    resp = wrapped(*args, **kwargs)
+                    if resp:
+                        span.set_attribute(OUTPUT_VALUE, safe_json_dumps(resp))
+                        span.set_attribute(OUTPUT_MIME_TYPE, "application/json")
+                        span.set_attribute(OUTPUT_VALUE, _raw_output(resp))
+                    span.set_status(trace_api.StatusCode.OK)
+                    return resp
+                except Exception as e:
+                    span.set_status(
+                        trace_api.Status(trace_api.StatusCode.ERROR, str(e))
+                    )
+                    span.record_exception(e)
+                    raise
+
+
+class _HandleResponseWrapper:
+    def __init__(self, tracer: trace_api.Tracer) -> None:
+        self._tracer = tracer
+
+    def __call__(
+        self,
+        wrapped: Callable[..., Any],
+        instance: Any,
+        args: Tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+            return wrapped(*args, **kwargs)
+
+        span_name = f"{wrapped.__module__}.{wrapped.__name__}"
+        raw_input = _raw_input(args, **kwargs)
+        attributes = dict(
+            _flatten(
+                {
+                    GEN_AI_SPAN_KIND: FiSpanKindValues.TOOL,
+                    INPUT_VALUE_MIME_TYPE: "application/json",
+                    INPUT_VALUE: safe_json_dumps(raw_input),
+                    INPUT_VALUE: safe_json_dumps(raw_input.get("messages", "")),
+                }
+            )
+        )
+
+        if inspect.iscoroutinefunction(wrapped):
+
+            async def wrapper():
+                with self._tracer.start_as_current_span(
+                    span_name,
+                    attributes=attributes,
+                    record_exception=False,
+                    set_status_on_exception=False,
+                ) as span:
+                    try:
+                        resp = await wrapped(*args, **kwargs)
+
+                        if resp:
+                            span.set_attribute(OUTPUT_MIME_TYPE, "application/json")
+                            span.set_attribute(OUTPUT_VALUE, _raw_output(resp))
+                        span.set_status(trace_api.StatusCode.OK)
+                        return resp
+                    except Exception as e:
+                        span.set_status(
+                            trace_api.Status(trace_api.StatusCode.ERROR, str(e))
+                        )
+                        span.record_exception(e)
+                        raise
+
+            return wrapper()
+        else:
+            with self._tracer.start_as_current_span(
+                span_name,
+                attributes=attributes,
+                record_exception=False,
+                set_status_on_exception=False,
+            ) as span:
+                try:
+                    resp = wrapped(*args, **kwargs)
+
+                    if resp:
+                        span.set_attribute(OUTPUT_MIME_TYPE, "application/json")
+                        span.set_attribute(OUTPUT_VALUE, _raw_output(resp))
+                    span.set_status(trace_api.StatusCode.OK)
+                    return resp
+                except Exception as e:
+                    span.set_status(
+                        trace_api.Status(trace_api.StatusCode.ERROR, str(e))
+                    )
+                    span.record_exception(e)
+                    raise
+
+
+def _to_dict(value: Any) -> Any:
+    """
+    Recursively converts objects to dictionaries.
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [_to_dict(item) for item in value]
+    if isinstance(value, dict):
+        return {k: _to_dict(v) for k, v in value.items()}
+    if isinstance(value, BaseModel):
+        return value.model_dump_json()
+    if hasattr(value, "__dict__"):
+        return vars(value)
+    return value
+
+
+def _raw_input(*args: Any, **kwargs: Any) -> str:
+    processed_input = {
+        **{f"arg_{i}": _to_dict(arg) for i, arg in enumerate(args)},
+        **{k: _to_dict(v) for k, v in kwargs.items()},
+    }
+    return processed_input
+
+
+def _raw_output(response: Any) -> str:
+    if not response:
+        return ""
+    return safe_json_dumps(_to_dict(response), cls=SafeJSONEncoder)
+
+
+INPUT_VALUE = SpanAttributes.INPUT_VALUE
+INPUT_VALUE_MIME_TYPE = SpanAttributes.INPUT_MIME_TYPE
+GEN_AI_SPAN_KIND = SpanAttributes.GEN_AI_SPAN_KIND
+OUTPUT_VALUE = SpanAttributes.OUTPUT_VALUE
+OUTPUT_MIME_TYPE = SpanAttributes.OUTPUT_MIME_TYPE
