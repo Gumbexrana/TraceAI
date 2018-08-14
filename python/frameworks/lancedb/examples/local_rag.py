@@ -77,3 +77,122 @@ def add_documents(documents: list[dict]):
     table.add(data)
     print(f"Added {len(data)} documents")
 
+
+def search(query: str, limit: int = 5) -> list[dict]:
+    """Search for similar documents."""
+    table = db.open_table(TABLE_NAME)
+    query_vector = generate_fake_embedding(query)
+
+    # Search (traced)
+    results = table.search(query_vector).limit(limit).to_list()
+
+    return [
+        {
+            "id": r["id"],
+            "text": r["text"],
+            "category": r["category"],
+            "distance": r.get("_distance", 0),
+        }
+        for r in results
+    ]
+
+
+def search_with_filter(query: str, category: str, limit: int = 5) -> list[dict]:
+    """Search with SQL-like filter."""
+    table = db.open_table(TABLE_NAME)
+    query_vector = generate_fake_embedding(query)
+
+    # Search with filter (traced)
+    results = (
+        table.search(query_vector)
+        .where(f"category = '{category}'")
+        .limit(limit)
+        .to_list()
+    )
+
+    return [
+        {
+            "id": r["id"],
+            "text": r["text"],
+            "distance": r.get("_distance", 0),
+        }
+        for r in results
+    ]
+
+
+def hybrid_search(query: str, limit: int = 5) -> list[dict]:
+    """Hybrid search combining vector and full-text search."""
+    table = db.open_table(TABLE_NAME)
+    query_vector = generate_fake_embedding(query)
+
+    # Hybrid search (traced)
+    # Note: Requires FTS index to be created on the text column
+    results = (
+        table.search(query_vector)
+        .limit(limit)
+        .to_list()
+    )
+
+    return [
+        {
+            "id": r["id"],
+            "text": r["text"],
+            "distance": r.get("_distance", 0),
+        }
+        for r in results
+    ]
+
+
+def delete_by_filter(category: str):
+    """Delete documents matching filter."""
+    table = db.open_table(TABLE_NAME)
+
+    # Delete (traced)
+    table.delete(f"category = '{category}'")
+    print(f"Deleted documents in category '{category}'")
+
+
+def list_tables():
+    """List all tables in the database."""
+    return db.table_names()
+
+
+if __name__ == "__main__":
+    # Example documents
+    docs = [
+        {"text": "Machine learning is a subset of AI.", "category": "ml"},
+        {"text": "Deep learning uses neural networks.", "category": "dl"},
+        {"text": "LanceDB is an embedded vector database.", "category": "db"},
+        {"text": "RAG combines retrieval with generation.", "category": "ml"},
+        {"text": "Vector search finds similar embeddings.", "category": "db"},
+    ]
+
+    # Create table with data
+    create_table_with_data(docs)
+
+    # List tables
+    print(f"\nTables in database: {list_tables()}")
+
+    # Search
+    query = "neural networks and deep learning"
+    print(f"\nSearching for: '{query}'")
+    results = search(query, limit=3)
+
+    print("\nTop results:")
+    for r in results:
+        print(f"  - [{r['category']}] {r['text'][:40]}... (distance: {r['distance']:.4f})")
+
+    # Filtered search
+    print(f"\nFiltered search (category='ml'):")
+    filtered = search_with_filter(query, category="ml", limit=2)
+    for r in filtered:
+        print(f"  - {r['text'][:50]}...")
+
+    # Add more documents
+    new_docs = [
+        {"text": "Transformers revolutionized NLP.", "category": "dl"},
+    ]
+    add_documents(new_docs)
+
+    # Cleanup (optional)
+    # db.drop_table(TABLE_NAME)
