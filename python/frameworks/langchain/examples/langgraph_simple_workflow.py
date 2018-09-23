@@ -70,3 +70,113 @@ def transform_data(state: WorkflowState) -> dict:
         "results": state["results"] + [f"Transformed: {transformed}"],
         "status": "transformed"
     }
+
+
+def handle_error(state: WorkflowState) -> dict:
+    """Error handling node for invalid data."""
+    print(f"Handling error for invalid data")
+    return {
+        "step": 3,
+        "results": state["results"] + ["Error: Input too short"],
+        "status": "error"
+    }
+
+
+def finalize(state: WorkflowState) -> dict:
+    """Final node: Finalize the workflow."""
+    print(f"Finalizing workflow with status: {state['status']}")
+    return {
+        "step": 4,
+        "results": state["results"] + ["Workflow complete"],
+        "status": "completed"
+    }
+
+
+# Define conditional edge function
+def route_after_validation(state: WorkflowState) -> Literal["transform", "error"]:
+    """Decide whether to transform or handle error based on validation."""
+    if state["status"] == "valid":
+        return "transform"
+    return "error"
+
+
+def build_workflow() -> StateGraph:
+    """Build the workflow graph."""
+    # Create the graph
+    workflow = StateGraph(WorkflowState)
+
+    # Add nodes
+    workflow.add_node("process", process_input)
+    workflow.add_node("validate", validate_data)
+    workflow.add_node("transform", transform_data)
+    workflow.add_node("error", handle_error)
+    workflow.add_node("finalize", finalize)
+
+    # Add edges
+    workflow.add_edge("process", "validate")
+    workflow.add_conditional_edges(
+        "validate",
+        route_after_validation,
+        {
+            "transform": "transform",
+            "error": "error"
+        }
+    )
+    workflow.add_edge("transform", "finalize")
+    workflow.add_edge("error", "finalize")
+    workflow.add_edge("finalize", END)
+
+    # Set entry point
+    workflow.set_entry_point("process")
+
+    return workflow
+
+
+def main():
+    """Run the workflow examples."""
+    print("=" * 60)
+    print("LangGraph Simple Workflow Example with Tracing")
+    print("=" * 60)
+
+    # Build and compile the graph
+    workflow = build_workflow()
+    app = workflow.compile()
+
+    # Example 1: Valid input (will be transformed)
+    print("\n--- Example 1: Valid Input ---")
+    result = app.invoke({
+        "input": "Hello World",
+        "step": 0,
+        "results": [],
+        "status": "pending"
+    })
+    print(f"Final state: {result}")
+
+    # Example 2: Invalid input (will trigger error handling)
+    print("\n--- Example 2: Invalid Input ---")
+    result = app.invoke({
+        "input": "Hi",  # Too short - will fail validation
+        "step": 0,
+        "results": [],
+        "status": "pending"
+    })
+    print(f"Final state: {result}")
+
+    # Example 3: Stream mode
+    print("\n--- Example 3: Stream Mode ---")
+    for chunk in app.stream({
+        "input": "Streaming Test",
+        "step": 0,
+        "results": [],
+        "status": "pending"
+    }):
+        print(f"Stream chunk: {chunk}")
+
+    print("\n" + "=" * 60)
+    print("Workflow examples completed!")
+    print("Check your trace dashboard for detailed execution traces.")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
