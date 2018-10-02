@@ -134,3 +134,208 @@ class Node:
         messages = []
         node = self
         while node:
+            messages.extend(
+                node.get_messages(include_reflections=include_reflections)[::-1]
+            )
+            node = node.parent
+        # Reverse the final back-tracked trajectory to return in the correct order
+        return messages[::-1]  # root solution, reflection, child 1, ...
+
+    def _get_all_children(self):
+        all_nodes = []
+        nodes = deque()
+        nodes.append(self)
+        while nodes:
+            node = nodes.popleft()
+            all_nodes.extend(node.children)
+            for n in node.children:
+                nodes.append(n)
+        return all_nodes
+
+    def get_best_solution(self):
+        """Return the best solution from within the current sub-tree."""
+        all_nodes = [self] + self._get_all_children()
+        best_node = max(
+            all_nodes,
+            # We filter out all non-terminal, non-solution trajectories
+            key=lambda node: int(node.is_terminal and node.is_solved) * node.value,
+        )
+        return best_node
+
+    def _mark_tree_as_solved(self):
+        parent = self.parent
+        while parent:
+            parent._is_solved = True
+            parent = parent.parent
+
+
+# Define the state type
+class TreeState(TypedDict):
+    root: Node
+    input: str
+
+
+# Initialize tools and LLM
+llm = ChatOpenAI(model="gpt-4")
+search = TavilySearchAPIWrapper()
+tavily_tool = TavilySearchResults(api_wrapper=search, max_results=5)
+tools = [tavily_tool]
+tool_node = ToolNode(tools=tools)
+
+# Define the reflection chain
+reflection_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "Evaluate the quality of this research report. Consider comprehensiveness, accuracy, and clarity.",
+        ),
+        ("user", "{input}"),
+        MessagesPlaceholder(variable_name="candidate"),
+    ]
+)
+
+reflection_llm_chain = (
+    reflection_prompt
+    | llm.bind_tools(tools=[Reflection], tool_choice="Reflection")
+    | PydanticToolsParser(tools=[Reflection])
+)
+
+
+@as_runnable
+def reflection_chain(inputs) -> Reflection:
+    tool_choices = reflection_llm_chain.invoke(inputs)
+    reflection = tool_choices[0]
+    if not isinstance(inputs["candidate"][-1], AIMessage):
+        reflection.found_solution = False
+    return reflection
+
+
+# Define the initial response generation
+initial_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You are a research assistant. Generate a comprehensive research report.",
+        ),
+        ("user", "{input}"),
+        MessagesPlaceholder(variable_name="messages", optional=True),
+    ]
+)
+
+initial_answer_chain = initial_prompt | llm.bind_tools(tools=tools)
+parser = JsonOutputToolsParser(return_id=True)
+
+
+def generate_initial_response(state: TreeState) -> dict:
+    res = initial_answer_chain.invoke({"input": state["input"]})
+    parsed = parser.invoke(res)
+    tool_responses = [
+        tool_node.invoke(
+            {
+                "messages": [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {"name": r["type"], "args": r["args"], "id": r["id"]}
+                        ],
+                    )
+                ]
+            }
+        )
+        for r in parsed
+    ]
+    output_messages = [res] + [tr["messages"][0] for tr in tool_responses]
+    reflection = reflection_chain.invoke(
+        {"input": state["input"], "candidate": output_messages}
+    )
+    root = Node(output_messages, reflection=reflection)
+    return {**state, "root": root}
+
+
+# Define the candidate generation and expansion logic
+def select(node: Node) -> Node:
+    """Select a node to expand using UCT."""
+    while node.children:
+        # If we found a solution, return it immediately
+        if node.is_solved:
+            return node.best_child_score
+        # Otherwise use UCT to select the most promising branch
+        node = max(node.children, key=lambda n: n.upper_confidence_bound())
+    return node
+
+
+def expand(state: TreeState) -> TreeState:
+    """Expand the tree by selecting a node and generating new candidates."""
+    root = state["root"]
+    node_to_expand = select(root)
+
+    # Generate new response based on the current trajectory
+    current_messages = node_to_expand.get_trajectory(include_reflections=True)
+    res = initial_answer_chain.invoke(
+        {"input": state["input"], "messages": current_messages}
+    )
+
+    # Parse and execute tool calls
+    parsed = parser.invoke(res)
+    tool_responses = [
+        tool_node.invoke(
+            {
+                "messages": [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {"name": r["type"], "args": r["args"], "id": r["id"]}
+                        ],
+                    )
+                ]
+            }
+        )
+        for r in parsed
+    ]
+
+    # Create new messages and get reflection
+    output_messages = [res] + [tr["messages"][0] for tr in tool_responses]
+    reflection = reflection_chain.invoke(
+        {"input": state["input"], "candidate": output_messages}
+    )
+
+    # Create new node and add to tree
+    new_node = Node(output_messages, reflection=reflection, parent=node_to_expand)
+    node_to_expand.children.append(new_node)
+
+    return state
+
+
+# Create the graph
+def should_loop(state: TreeState):
+    root = state["root"]
+    if root.is_solved:
+        return END
+    if root.height > 3:  # Limit tree depth
+        return END
+    return "expand"
+
+
+builder = StateGraph(TreeState)
+builder.add_node("start", generate_initial_response)
+builder.add_node("expand", expand)
+builder.add_edge(START, "start")
+builder.add_conditional_edges("start", should_loop, ["expand", END])
+builder.add_conditional_edges("expand", should_loop, ["expand", END])
+
+graph = builder.compile()
+
+# Example usage
+if __name__ == "__main__":
+    question = (
+        "Write a research report on the environmental impact of electric vehicles"
+    )
+    result = graph.invoke({"input": question})
+
+    # Get the best solution
+    final_node = result["root"].get_best_solution()
+    best_trajectory = final_node.get_trajectory(include_reflections=False)
+
+    # Print the final research report
+    print("Final Research Report:")
+    print(best_trajectory[-1].content)
