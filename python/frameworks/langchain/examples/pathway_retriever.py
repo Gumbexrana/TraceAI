@@ -16,3 +16,30 @@ eval_tags = [
         value=EvalSpanKind.TOOL,
         type=EvalTagType.OBSERVATION_SPAN,
         config={
+            "multi_choice": False,
+            "choices": ["Yes", "No"],
+            "rule_prompt": "Evaluate if the response is correct",
+        },
+        custom_eval_name="<custom_eval_name>",
+    )
+]
+
+# Configure trace provider with custom evaluation tags
+trace_provider = register(
+    project_type=ProjectType.EXPERIMENT,
+    eval_tags=eval_tags,
+    project_name="FUTURE_AGI",
+    project_version_name="v1",
+)
+
+# Initialize the LangChain instrumentor
+LangChainInstrumentor().instrument(tracer_provider=trace_provider)
+
+
+if __name__ == "__main__":
+    client = PathwayVectorClient(
+        url="https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+    )
+    retriever = client.as_retriever()
+
+    retriever.invoke("what is pathway?")
