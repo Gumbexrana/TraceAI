@@ -1,0 +1,6 @@
+# Dependencies for running the scripts in this examples/ directory.
+#
+# These demos use pre-1.0 LangChain APIs (e.g. langchain.chains.LLMChain,
+# langchain.agents.AgentExecutor, langchain.memory.ConversationBufferMemory,
+# langchain.schema / langchain.vectorstores / langchain.embeddings) that were
+# removed in LangChain 1.0, so the langchain family is pinned to the 0.3 line here.
