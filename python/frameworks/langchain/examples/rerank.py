@@ -38,3 +38,63 @@ sample_docs = [
     Document(
         page_content="Deep Learning is a type of machine learning based on artificial neural networks. "
         "It's particularly effective in tasks like image recognition, natural language processing, "
+        "and speech recognition.",
+        metadata={"source": "Deep Learning Info"},
+    ),
+    Document(
+        page_content="Data Science combines statistics, programming, and domain expertise to extract "
+        "meaningful insights from data. It involves data collection, cleaning, analysis, and visualization. "
+        "Python is a popular language for data science.",
+        metadata={"source": "Data Science Overview"},
+    ),
+]
+
+
+def create_vector_store(documents):
+    """Create a FAISS vector store from documents."""
+    embeddings = OpenAIEmbeddings()
+    vector_store = FAISS.from_documents(documents, embeddings)
+    return vector_store
+
+
+def setup_reranker():
+    """Setup the Cohere reranker."""
+    compressor = CohereRerank(
+        model="rerank-english-v2.0", top_n=3  # Reduced to 3 for this example
+    )
+    return compressor
+
+
+def main():
+    # Create vector store directly from sample documents
+    vector_store = create_vector_store(sample_docs)
+    base_retriever = vector_store.as_retriever(search_kwargs={"k": 5})
+
+    # Setup reranker
+    compressor = setup_reranker()
+
+    # Create compression retriever
+    compression_retriever = ContextualCompressionRetriever(
+        base_compressor=compressor, base_retriever=base_retriever
+    )
+
+    # Example queries
+    queries = [
+        "What is artificial intelligence?",
+        "How is Python used in data science?",
+        "Explain machine learning",
+    ]
+
+    # Get and print results for each query
+    for query in queries:
+        # print(f"\nQuery: {query}")
+        # print("\nReranked Results:")
+        compressed_docs = compression_retriever.get_relevant_documents(query)
+        for i, doc in enumerate(compressed_docs, 1):
+            print(f"\n{i}. Source: {doc.metadata['source']}")
+            print(f"   Content: {doc.page_content}")
+        print("\n" + "=" * 50)
+
+
+if __name__ == "__main__":
+    main()
