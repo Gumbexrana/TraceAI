@@ -134,3 +134,208 @@ def get_weather_info(
         81: "moderate rain showers",
         82: "violent rain showers",
         85: "slight snow showers",
+        86: "heavy snow showers",
+        95: "thunderstorm",
+        96: "thunderstorm with slight hail",
+        99: "thunderstorm with heavy hail",
+    }
+
+    return {
+        "temperature": current["temperature_2m"],
+        "humidity": current["relative_humidity_2m"],
+        "conditions": weather_codes.get(current["weather_code"], "unknown"),
+        "wind_speed": current["wind_speed_10m"],
+    }
+
+
+@tool
+def get_stock_info(symbol: str) -> dict:
+    """Retrieves current stock market information for a specified symbol using Yahoo Finance.
+
+    Args:
+        symbol (str): Stock symbol (e.g., "AAPL" for Apple Inc.)
+
+    Returns:
+        dict: Basic stock data including current price and daily change
+    """
+    # Using Yahoo Finance public data
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+
+    data = response.json()
+    if (
+        "chart" not in data
+        or "result" not in data["chart"]
+        or not data["chart"]["result"]
+    ):
+        raise ValueError(f"No data found for symbol '{symbol}'")
+
+    quote = data["chart"]["result"][0]["meta"]
+    return {
+        "symbol": symbol.upper(),
+        "price": quote.get("regularMarketPrice", 0),
+        "previous_close": quote.get("previousClose", 0),
+        "currency": quote.get("currency", "USD"),
+        "exchange": quote.get("exchangeName", "N/A"),
+    }
+
+
+@tool
+def get_document_qa(query: str, pdf_folder: str = "documents") -> str:
+    """Answers questions based on the content of PDF documents in the specified folder.
+
+    Args:
+        query (str): The question to answer about the documents
+        pdf_folder (str): Folder containing PDF documents (default: "documents")
+
+    Returns:
+        str: Answer based on the document content
+    """
+    if not os.path.exists(pdf_folder):
+        raise ValueError(f"PDF folder '{pdf_folder}' does not exist")
+
+    if not os.getenv("OPENAI_API_KEY"):
+        raise ValueError("Please set OPENAI_API_KEY environment variable")
+
+    if not os.getenv("COHERE_API_KEY"):
+        raise ValueError("Please set COHERE_API_KEY environment variable")
+
+    # Create RAG pipeline
+    documents = []
+    for filename in os.listdir(pdf_folder):
+        if filename.endswith(".pdf"):
+            pdf_path = os.path.join(pdf_folder, filename)
+            loader = PyPDFLoader(pdf_path)
+            documents.extend(loader.load())
+
+    if not documents:
+        raise ValueError(f"No PDF files found in {pdf_folder}")
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""],
+    )
+    texts = text_splitter.split_documents(documents)
+
+    embeddings = OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        api_key=os.getenv("OPENAI_API_KEY"),
+    )
+    vectorstore = FAISS.from_documents(texts, embeddings)
+
+    base_retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
+    reranker = CohereRerank(
+        cohere_api_key=os.getenv("COHERE_API_KEY"),
+        model="rerank-english-v2.0",
+        top_n=4,
+    )
+
+    compression_retriever = ContextualCompressionRetriever(
+        base_compressor=reranker, base_retriever=base_retriever
+    )
+
+    llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=compression_retriever,
+    )
+
+    result = qa_chain.invoke({"query": query})
+    return result["result"]
+
+
+def create_agent(tools: list) -> agents.AgentExecutor:
+    """Create and configure the LangChain agent.
+
+    Args:
+        tools (list): List of tools available to the agent
+
+    Returns:
+        agents.AgentExecutor: Configured agent executor
+    """
+    llm = ChatOpenAI(model_name="gpt-4.1-nano", temperature=0)
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are a helpful AI assistant. Get information using tools. "
+                "Before providing a final answer, run the run_guardrail_check tool on your proposed answer.",
+            ),
+            ("human", "{input}"),
+            ("human", "Chat history: {chat_history}"),
+            ("placeholder", "{agent_scratchpad}"),
+        ]
+    )
+    agent = agents.create_tool_calling_agent(llm, tools, prompt)
+    return agents.AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
+
+
+def main():
+    """Main execution function."""
+    # Get the specific FITracer instance from setup
+    tracer = setup_instrumentation()
+    evaluator = Evaluator(
+        fi_api_key=os.environ.get("FI_API_KEY"),
+        fi_secret_key=os.environ.get("FI_SECRET_KEY"),
+        fi_base_url=os.environ.get("FI_BASE_URL"),
+    )
+    protector = Protect(evaluator=evaluator)
+    tools = [get_weather_info, get_stock_info, get_document_qa]
+    agent_executor = create_agent(tools)
+
+    # Example queries with conversation context
+    queries = [
+        "What's the current weather like in London?",
+        "How does that compare to New York?",
+        "What's the latest stock price for AAPL?",
+        "And how about MSFT?",
+    ]
+    rules = [
+        {"metric": "Tone", "contains": ["anger", "fear"], "type": "any"},
+        {"metric": "Toxicity"},
+        {
+            "metric": "Prompt Injection",
+        },
+    ]
+    results = []
+    for query in queries:
+        # Create a parent span for each query processing step using the correct tracer
+        with tracer.start_as_current_span(
+            f"Process Query: {query[:50]}..."
+        ) as parent_span:  # Limit query length for span name
+            # Agent execution should now inherit context from parent_span
+            agent_result = agent_executor.invoke({"input": query})
+
+            # Guardrail execution should also inherit context from parent_span
+            protect_result = protector.protect(
+                inputs=query, protect_rules=rules, action="block", reason=True
+            )  # Protecting original query for now
+
+            # Add attributes to the parent span
+            parent_span.set_attribute(
+                "agent.output", str(agent_result.get("output", ""))
+            )
+            parent_span.set_attribute(
+                "guardrail.status", protect_result.get("status", "")
+            )
+            parent_span.set_attribute(
+                "guardrail.failed_rule", protect_result.get("failed_rule", "")
+            )
+
+            results.append(protect_result)  # Or maybe agent_result?
+
+    return results
+
+
+if __name__ == "__main__":
+    main()
