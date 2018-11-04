@@ -54,3 +54,88 @@ class TestLangGraphInstrumentor:
     # async nodes and corrupt concurrent state).
 
     def _fresh(self):
+        from opentelemetry.sdk.trace import TracerProvider
+        from traceai_langchain._langgraph._instrumentor import LangGraphInstrumentor
+
+        LangGraphInstrumentor._instance = None
+        LangGraphInstrumentor._is_instrumented = False
+        return LangGraphInstrumentor(), TracerProvider()
+
+    def test_instrument_does_not_patch_stategraph(self):
+        """The shim must leave StateGraph.add_node / compile untouched."""
+        from langgraph.graph.state import StateGraph
+
+        orig_add_node = StateGraph.add_node
+        orig_compile = StateGraph.compile
+
+        inst, provider = self._fresh()
+        inst.instrument(tracer_provider=provider)
+        try:
+            assert StateGraph.add_node is orig_add_node
+            assert StateGraph.compile is orig_compile
+        finally:
+            inst.uninstrument()
+
+    def test_instrument_toggles_is_instrumented(self):
+        inst, provider = self._fresh()
+        inst.instrument(tracer_provider=provider)
+        assert inst.is_instrumented is True
+        inst.uninstrument()
+        assert inst.is_instrumented is False
+
+    def test_double_instrument_is_safe_and_leaves_stategraph_unpatched(self):
+        """A second instantiation + instrument() must not break StateGraph
+        (the old singleton __init__-rerun nulled saved originals — finding #7)."""
+        from langgraph.graph.state import StateGraph
+        from traceai_langchain._langgraph._instrumentor import LangGraphInstrumentor
+
+        orig_add_node = StateGraph.add_node
+        inst, provider = self._fresh()
+        inst.instrument(tracer_provider=provider)
+        LangGraphInstrumentor().instrument(tracer_provider=provider)  # 2nd call
+        try:
+            assert StateGraph.add_node is orig_add_node
+            # A graph can still be built and add_node still works.
+            g = StateGraph(dict)
+            g.add_node("n", lambda s: s)
+        finally:
+            inst.uninstrument()
+
+    def test_instrument_logs_deprecation_warning(self, caplog):
+        import logging
+        from traceai_langchain._langgraph._instrumentor import LangGraphInstrumentor
+
+        inst, provider = self._fresh()
+        LangGraphInstrumentor._deprecation_logged = False
+        with caplog.at_level(logging.WARNING):
+            inst.instrument(tracer_provider=provider)
+        inst.uninstrument()
+        assert any("deprecated" in r.message.lower() for r in caplog.records)
+
+    def test_uninstrument_is_idempotent(self):
+        inst, provider = self._fresh()
+        inst.instrument(tracer_provider=provider)
+        inst.uninstrument()
+        inst.uninstrument()  # second call must be a safe no-op
+        assert inst.is_instrumented is False
+
+
+class TestLangGraphInstrumentorExports:
+    """Test LangGraph instrumentor exports."""
+
+    def test_main_init_exports(self):
+        """Test that main __init__ exports LangGraph classes."""
+        from traceai_langchain import LangGraphInstrumentor, LangGraphAttributes
+
+        assert LangGraphInstrumentor is not None
+        assert LangGraphAttributes is not None
+
+    def test_langgraph_submodule_exports(self):
+        """Test that _langgraph submodule exports correctly."""
+        from traceai_langchain._langgraph import (
+            LangGraphInstrumentor,
+            LangGraphAttributes,
+        )
+
+        assert LangGraphInstrumentor is not None
+        assert LangGraphAttributes is not None
