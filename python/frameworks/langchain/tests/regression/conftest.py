@@ -63,3 +63,32 @@ def lc_tracing():
 @pytest.fixture
 def both_tracing():
     """Enable LangChain + LangGraph instrumentors (customer setup). Yields the exporter."""
+    from traceai_langchain import LangChainInstrumentor, LangGraphInstrumentor
+
+    exporter, provider = _make_provider()
+    lc = LangChainInstrumentor()
+    lc.instrument(tracer_provider=provider)
+    _reset_langgraph_singleton()
+    lg = LangGraphInstrumentor()
+    lg.instrument(tracer_provider=provider)
+    try:
+        yield exporter
+    finally:
+        with contextlib.suppress(Exception):
+            lg.uninstrument()
+        with contextlib.suppress(Exception):
+            lc.uninstrument()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_stategraph():
+    """Force-restore pristine StateGraph methods and reset the LangGraph singleton
+    after every test, so a leaked global patch can't corrupt an unrelated test."""
+    yield
+    StateGraph.add_node = _PRISTINE_ADD_NODE
+    StateGraph.compile = _PRISTINE_COMPILE
+    _reset_langgraph_singleton()
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "slow: heavy tests (real dependency resolution) — opt-in")
