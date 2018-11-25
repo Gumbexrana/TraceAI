@@ -57,3 +57,29 @@ gaps that are now closed:
 | `test_real_error_still_marks_span_error` | Area 2 must not suppress *real* errors | A node raising `ValueError` must still yield an ERROR span + exception event. Proven effective: broadening `_is_graph_interrupt` to `return True` makes this test fail. |
 | `test_async_interrupt_node_span_is_not_error` | #4 on the customer's **async** path | Async `interrupt()` via `ainvoke` → node span OK + `langgraph.interrupt`. |
 | `test_node_enrichment_not_on_child_llm_span` | Area 1 enrichment scoping | Canonical `gen_ai.agent.graph.node_name` is emitted only on the node's own span (`run.name == langgraph_node`), not on nested LLM/tool child runs. |
+
+Fixed-tree baseline is now **19 passed, 1 opt-in slow skipped** (regression suite);
+**218 passed** for the full package suite.
+
+## Findings intentionally not given a dedicated failing test
+
+- **#6 stream span leak on partial drain** — reproducing a *leaked* (never-closed) span
+  deterministically requires forcing generator finalization/GC timing; it is covered
+  indirectly (the shim removes stream wrapping entirely, asserted by #5). Add a
+  targeted leak test if the fix keeps any stream wrapping.
+- **#9 `entry_point` never resolves**, **#10 reducer-ignoring diff**, **#11 `wrap_condition`
+  async**, **#12 single-arg `add_node`** — cosmetic / latent / out of the critical cluster
+  (see the fix plan). They fall away with node/graph wrapping removed; add tests if any
+  wrapping is retained.
+
+## Environment
+
+The customer's exact stack, with the package installed `--no-deps` to avoid the
+`langchain[all]` extras explosion:
+
+```
+python -m venv .tvenv && . .tvenv/bin/activate
+pip install fi-instrumentation-otel langchain-core==1.0.2 langgraph==1.0.1 \
+            langgraph-prebuilt==1.0.8 opentelemetry-sdk wrapt pytest pytest-asyncio
+pip install --no-deps -e python/frameworks/langchain
+```
