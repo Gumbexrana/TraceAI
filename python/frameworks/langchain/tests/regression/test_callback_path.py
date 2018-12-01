@@ -171,3 +171,78 @@ def test_interrupt_bookkeeping_is_drained(lc_tracing):
     app = build_interrupt_graph()
     app.invoke(INPUT, {"configurable": {"thread_id": "drain-normal"}})
     assert len(tracer._interrupt_run_ids) == 0, "interrupt ids leaked on a normal turn"
+    with suppress_tracing():
+        app.invoke(INPUT, {"configurable": {"thread_id": "drain-suppressed"}})
+    assert len(tracer._interrupt_run_ids) == 0, "interrupt ids leaked under suppression"
+
+
+def test_hitl_turn_logs_no_on_interrupt_error(lc_tracing, caplog):
+    """The tracer implements ``on_interrupt``/``on_resume`` so langgraph (>=1.2) does not
+    log an ``AttributeError`` on every HITL turn. (No-op on older langgraph that doesn't
+    dispatch the callback, but a real guard on the pinned 1.x line.)"""
+    import logging
+
+    app = build_tool_interrupt_graph()
+    with caplog.at_level(logging.ERROR):
+        app.invoke(INPUT, {"configurable": {"thread_id": "hitl-log"}})
+    offending = [
+        r for r in caplog.records
+        if "on_interrupt" in r.getMessage() and "AttributeError" in r.getMessage()
+    ]
+    assert not offending, f"on_interrupt error logged: {[r.getMessage() for r in offending]}"
+
+
+@pytest.mark.asyncio
+async def test_async_interrupt_node_span_is_not_error(lc_tracing):
+    """GREEN guard for the customer's ASYNC HITL path. An async node that calls
+    interrupt() must yield an OK node span with an interrupt marker (not ERROR)."""
+    app = build_async_interrupt_graph()
+    await app.ainvoke(INPUT, {"configurable": {"thread_id": "async-hitl"}})
+    node_spans = spans_named(lc_tracing, "ask_human")
+    assert node_spans, "no async node span named 'ask_human'"
+    for s in node_spans:
+        assert s.status.status_code.name != "ERROR", "async interrupt marked node ERROR"
+        assert (s.attributes or {}).get("langgraph.interrupt") is True
+
+
+def test_node_enrichment_not_on_child_llm_span(lc_tracing):
+    """The canonical graph-node attribute belongs on the node's own span, not on
+    nested LLM/tool child spans (which inherit `langgraph_node` metadata) — else a
+    consumer counting node-id spans over-counts."""
+    app = build_llm_node_graph()
+    app.invoke(INPUT)
+    spans = lc_tracing.get_finished_spans()
+    node = [s for s in spans if s.name == "agent"]
+    llm = [s for s in spans if (s.attributes or {}).get(SPAN_KIND_ATTR) == "LLM"]
+    assert node and llm, f"need both node and LLM spans; got {[s.name for s in spans]}"
+    assert all((s.attributes or {}).get(GRAPH_NODE_NAME_ATTR) == "agent" for s in node)
+    assert all(GRAPH_NODE_NAME_ATTR not in (s.attributes or {}) for s in llm), (
+        "canonical node-name attribute leaked onto a child LLM span"
+    )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_ainvoke_isolated_span_trees(lc_tracing):
+    """GREEN. Two concurrent conversations, forced to interleave, produce two
+    disjoint trace trees — the base tracer keys everything by run.id, so there is
+    no shared-state cross-contamination. (Contrast: finding #2 on the LangGraph
+    instrumentor's shared singleton.)"""
+    enter_a, release_a = asyncio.Event(), asyncio.Event()
+    enter_b, release_b = asyncio.Event(), asyncio.Event()
+    app_a = build_barrier_async_graph(enter_a, release_a)
+    app_b = build_barrier_async_graph(enter_b, release_b)
+
+    async def run(app, tid):
+        return await app.ainvoke(INPUT, {"configurable": {"thread_id": tid}})
+
+    task_a = asyncio.create_task(run(app_a, "A"))
+    task_b = asyncio.create_task(run(app_b, "B"))
+    # Force interleave: both graphs are parked inside their node simultaneously.
+    await asyncio.wait_for(enter_a.wait(), timeout=5)
+    await asyncio.wait_for(enter_b.wait(), timeout=5)
+    release_a.set()
+    release_b.set()
+    await asyncio.gather(task_a, task_b)
+
+    trace_ids = {s.context.trace_id for s in lc_tracing.get_finished_spans()}
+    assert len(trace_ids) == 2, f"expected 2 isolated traces, got {len(trace_ids)}"
