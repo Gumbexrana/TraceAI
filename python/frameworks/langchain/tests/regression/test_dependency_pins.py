@@ -73,3 +73,36 @@ def test_langchain_pin_does_not_block_1x():
         f"langchain pin {spec_str} rejects {TARGET}; customers must use --no-deps"
     )
 
+
+@pytest.mark.skipif(tomllib is None, reason="tomllib unavailable")
+def test_langchain_community_pin_does_not_block_1x():
+    """RED — flags §5.4. langchain-community 0.3.x transitively caps langchain-core
+    <0.4; if required at all its pin must admit 1.0.2. (The fix drops it.)"""
+    data = tomllib.loads(PYPROJECT.read_text())
+    spec_str = _dep_version(data, "langchain-community")
+    if spec_str is None:
+        return  # not a required dependency → cannot block resolution
+    assert TARGET in _poetry_to_specifier(spec_str), (
+        f"langchain-community pin {spec_str} rejects {TARGET}"
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(os.environ.get("FI_RUN_SLOW") != "1", reason="set FI_RUN_SLOW=1 to run")
+def test_resolves_with_langchain_1x_without_no_deps(tmp_path):
+    """RED — flags §5.4 end-to-end. A real resolve of this package alongside
+    langchain/langgraph 1.x, WITHOUT --no-deps, must succeed."""
+    import subprocess
+    import sys
+    import venv
+
+    venv_dir = tmp_path / "resolve_venv"
+    venv.EnvBuilder(with_pip=True).create(venv_dir)
+    py = venv_dir / "bin" / "python"
+    pkg = str(PYPROJECT.parent)
+    proc = subprocess.run(
+        [str(py), "-m", "pip", "install", "--dry-run",
+         pkg, "langchain==1.0.2", "langgraph==1.0.1"],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert proc.returncode == 0, f"resolution failed:\n{proc.stderr[-2000:]}"
