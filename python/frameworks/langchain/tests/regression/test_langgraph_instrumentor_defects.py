@@ -81,3 +81,39 @@ def test_execution_counter_not_shared_across_conversations(both_tracing):
     )
 
 
+def test_reinstrumentation_does_not_break_graph_build(both_tracing):
+    """RED — flags finding #7 (singleton __init__ re-run nulls saved originals).
+
+    A second `LangGraphInstrumentor()` re-runs __init__ and sets
+    `_original_add_node = None` while the patch stays installed, so the next
+    `add_node` calls `None(...)` → TypeError. Fails today; passes when the shim
+    stores no originals."""
+    from traceai_langchain import LangGraphInstrumentor
+
+    LangGraphInstrumentor()  # 2nd instantiation (both_tracing already made one)
+    app = build_sync_graph()  # add_node -> 'NoneType' object is not callable today
+    out = app.invoke(INPUT)
+    assert out["value"] == 2
+
+
+def test_uninstrument_restores_stategraph_methods():
+    """RED — flags finding #7 lifecycle (uninstrument must fully restore).
+
+    After instrument()+uninstrument(), `StateGraph.add_node` / `.compile` must be
+    the originals. Today the wrapped methods / nulled originals can leave StateGraph
+    patched. Passes trivially once the shim never patches StateGraph."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from langgraph.graph.state import StateGraph
+    from traceai_langchain import LangGraphInstrumentor
+
+    orig_add_node = StateGraph.add_node
+    orig_compile = StateGraph.compile
+
+    LangGraphInstrumentor._instance = None
+    LangGraphInstrumentor._is_instrumented = False
+    inst = LangGraphInstrumentor()
+    inst.instrument(tracer_provider=TracerProvider())
+    inst.uninstrument()
+
+    assert StateGraph.add_node is orig_add_node, "add_node not restored after uninstrument"
+    assert StateGraph.compile is orig_compile, "compile not restored after uninstrument"
