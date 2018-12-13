@@ -171,3 +171,78 @@ def build_tool_interrupt_graph():
         """Human-in-the-loop approval tool."""
         interrupt({"q": item})
         return "approved"
+
+    def seed(state: State):
+        return {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "ask_approval", "args": {"item": "x"}, "id": "c1", "type": "tool_call"}
+                    ],
+                )
+            ]
+        }
+
+    g = StateGraph(State)
+    g.add_node("seed", seed)
+    g.add_node("tools", ToolNode([ask_approval]))
+    g.add_edge(START, "seed")
+    g.add_edge("seed", "tools")
+    g.add_edge("tools", END)
+    return g.compile(checkpointer=MemorySaver())
+
+
+def build_command_handoff_graph():
+    """route -> Command(goto='done'): a ParentCommand control-flow bubble-up (not HITL)."""
+    from langgraph.types import Command
+
+    def route(state: State):
+        return Command(goto="done")
+
+    def done(state: State):
+        return {"value": 9}
+
+    g = StateGraph(State)
+    g.add_node("route", route)
+    g.add_node("done", done)
+    g.add_edge(START, "route")
+    g.add_edge("done", END)
+    return g.compile()
+
+
+def build_store_graph():
+    """Node whose signature requests LangGraph's injected `store`."""
+    from langgraph.store.memory import InMemoryStore
+
+    def agent(state: State, *, store):
+        return {"value": state["value"] + 1}
+
+    g = StateGraph(State)
+    g.add_node("agent", agent)
+    g.add_edge(START, "agent")
+    g.add_edge("agent", END)
+    return g.compile(store=InMemoryStore())
+
+
+# --------------------------------------------------------------------------- #
+# Span utilities
+# --------------------------------------------------------------------------- #
+GRAPH_NODE_NAME_ATTR = "gen_ai.agent.graph.node_name"
+SPAN_KIND_ATTR = "gen_ai.span.kind"
+
+
+def span_names(exporter) -> list[str]:
+    return [s.name for s in exporter.get_finished_spans()]
+
+
+def spans_named(exporter, name: str) -> list:
+    return [s for s in exporter.get_finished_spans() if s.name == name]
+
+
+def span_kinds(exporter) -> list[str]:
+    return [(s.attributes or {}).get(SPAN_KIND_ATTR) for s in exporter.get_finished_spans()]
+
+
+def attr(span, key, default=None):
+    return (span.attributes or {}).get(key, default)
