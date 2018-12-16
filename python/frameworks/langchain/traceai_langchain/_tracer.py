@@ -1,0 +1,849 @@
+import json
+import logging
+import math
+import time
+import traceback
+from copy import deepcopy
+from datetime import datetime, timezone
+from enum import Enum
+from itertools import chain
+from threading import RLock
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    Hashable,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    cast,
+)
+from uuid import UUID
+
+import wrapt  # type: ignore
+from fi_instrumentation import get_attributes_from_context, safe_json_dumps
+from fi_instrumentation.fi_types import (
+    DocumentAttributes,
+    EmbeddingAttributes,
+    FiMimeTypeValues,
+    FiSpanKindValues,
+    ImageAttributes,
+    MessageAttributes,
+    MessageContentAttributes,
+    RerankerAttributes,
+    SpanAttributes,
+    ToolCallAttributes,
+)
+from fi_instrumentation.instrumentation._tracers import FITracer
+from langchain_core.messages import BaseMessage
+from langchain_core.messages.human import HumanMessage
+from langchain_core.tracers import BaseTracer, LangChainTracer
+from langchain_core.tracers.schemas import Run
+from opentelemetry import context as context_api
+from opentelemetry import trace as trace_api
+from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
+from opentelemetry.semconv.trace import SpanAttributes as OTELSpanAttributes
+from opentelemetry.trace import Span
+from opentelemetry.util.types import AttributeValue
+from wrapt import ObjectProxy
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
+_AUDIT_TIMING = False
+
+
+@wrapt.decorator  # type: ignore
+def audit_timing(wrapped: Any, _: Any, args: Any, kwargs: Any) -> Any:
+    if not _AUDIT_TIMING:
+        return wrapped(*args, **kwargs)
+    start_time = time.perf_counter()
+    try:
+        return wrapped(*args, **kwargs)
+    finally:
+        latency_ms = (time.perf_counter() - start_time) * 1000
+
+
+K = TypeVar("K", bound=Hashable)
+V = TypeVar("V")
+
+
+class _DictWithLock(ObjectProxy, Generic[K, V]):  # type: ignore
+    """
+    A wrapped dictionary with lock
+    """
+
+    def __init__(self, wrapped: Optional[Dict[str, V]] = None) -> None:
+        super().__init__(wrapped or {})
+        self._self_lock = RLock()
+
+    def get(self, key: K, default: Optional[V] = None) -> Optional[V]:
+        with self._self_lock:
+            return cast(Optional[V], self.__wrapped__.get(key, default))
+
+    def pop(self, key: K, *args: Any) -> Optional[V]:
+        with self._self_lock:
+            return cast(Optional[V], self.__wrapped__.pop(key, *args))
+
+    def __getitem__(self, key: K) -> V:
+        with self._self_lock:
+            return cast(V, super().__getitem__(key))
+
+    def __setitem__(self, key: K, value: V) -> None:
+        with self._self_lock:
+            super().__setitem__(key, value)
+
+    def __delitem__(self, key: K) -> None:
+        with self._self_lock:
+            super().__delitem__(key)
+
+
+class FiTracer(BaseTracer):
+    __slots__ = ("_tracer", "_spans_by_run", "_context_by_run")
+
+    def _extract_content(self, data: Any) -> Any:
+        """Extract clean content from various message formats"""
+        if isinstance(data, dict):
+            # Handle dictionary format
+            if "content" in data:
+                return data["content"]
+            if "generations" in data and isinstance(data["generations"], list):
+                for gen in data["generations"][0]:  # Take first generation
+                    if "text" in gen:
+                        return gen["text"]
+                    if "message" in gen and isinstance(gen["message"], dict):
+                        return gen["message"].get("content")
+            if "messages" in data and isinstance(data["messages"], list):
+                messages_content = []
+                for msg_list in data["messages"]:
+                    if isinstance(msg_list, list):
+                        for msg in msg_list:
+                            if isinstance(msg, dict) and "kwargs" in msg:
+                                content = msg["kwargs"].get("content")
+                                if content:
+                                    messages_content.append(content)
+                    elif isinstance(msg_list, HumanMessage):
+                        messages_content.append(msg_list.content)
+                return (
+                    messages_content[0]
+                    if len(messages_content) == 1
+                    else messages_content
+                )
+            if "input" in data:
+                return data["input"]
+            if "query" in data:
+                return data["query"]
+            return data
+        elif hasattr(data, "content"):
+            # Handle message objects
+            return data.content
+        elif isinstance(data, (list, tuple)):
+            # Handle list format
+            if len(data) == 1:
+                return self._extract_content(data[0])
+            return [self._extract_content(item) for item in data]
+        return data
+
+    def _send_span_data_to_api(
+        self, span: Span, input_data: Any, output_data: Any
+    ) -> None:
+        """Send span data to API and add to span attributes"""
+        try:
+            # cleaned_input = self._extract_content(input_data)
+            cleaned_output = self._extract_content(output_data)
+
+            span_data = {
+                "span_id": span.context.span_id,
+                # "input": cleaned_input,
+                "output": cleaned_output,
+            }
+
+            # Input/output are already captured in gen_ai.input/output.messages
+            # No need for redundant attributes
+            pass
+
+        except Exception as e:
+            logger.exception(f"Error sending span data to API: {e}")
+
+    def __init__(self, fi_tracer: "FITracer", *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if TYPE_CHECKING:
+            # check that `run_map` still exists in parent class
+            assert self.run_map
+        self.run_map = _DictWithLock[str, Run](self.run_map)
+        self._tracer = fi_tracer
+        self._spans_by_run: Dict[UUID, Span] = _DictWithLock[UUID, Span]()
+        self._context_by_run: Dict[UUID, Dict[str, Any]] = _DictWithLock[
+            UUID, Dict[str, Any]
+        ]()
+        self._lock = RLock()  # handlers may be run in a thread by langchain
+        # Run ids whose chain run ended in a LangGraph interrupt (an intentional
+        # pause, not an error) — used to keep the node span status OK.
+        self._interrupt_run_ids: Dict[UUID, bool] = _DictWithLock[UUID, bool]()
+
+    def get_span(self, run_id: UUID) -> Optional[Span]:
+        return self._spans_by_run.get(run_id)
+
+    @audit_timing  # type: ignore
+    def _start_trace(self, run: Run) -> None:
+        self.run_map[str(run.id)] = run
+        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+            return
+
+        # Capture context attributes at span start time
+        captured_context = dict(get_attributes_from_context())
+
+        with self._lock:
+            parent_context = (
+                trace_api.set_span_in_context(parent)
+                if (parent_run_id := run.parent_run_id)
+                and (parent := self._spans_by_run.get(parent_run_id))
+                else None
+            )
+            # Store the captured context for this run
+            self._context_by_run[run.id] = captured_context
+
+        # We can't use real time because the handler may be
+        # called in a background thread.
+        start_time_utc_nano = _as_utc_nano(run.start_time)
+        span = self._tracer.start_span(
+            name=run.name,
+            context=parent_context,
+            start_time=start_time_utc_nano,
+        )
+
+        # The following line of code is commented out to serve as a reminder that in a system
+        # of callbacks, attaching the context can be hazardous because there is no guarantee
+        # that the context will be detached. An error could happen between callbacks leaving
+        # the context attached forever, and all future spans will use it as parent. What's
+        # worse is that the error could have also prevented the span from being exported,
+        # leaving all future spans as orphans. That is a very bad scenario.
+        # token = context_api.attach(context)
+        with self._lock:
+            self._spans_by_run[run.id] = span
+
+        # Send initial span data with input
+        input_data = None
+        if run.inputs:
+            if isinstance(run.inputs, dict):
+                input_data = (
+                    run.inputs.get("input") or run.inputs.get("query") or run.inputs
+                )
+            else:
+                input_data = run.inputs
+
+        # self._send_span_data_to_api(
+        #     span_id=format(span.context.span_id, "016x"),
+        #     input_data=input_data,
+        #     output_data=None  # Output not available at start
+        # )
+
+    @audit_timing  # type: ignore
+    def _end_trace(self, run: Run) -> None:
+        self.run_map.pop(str(run.id), None)
+        # Drain all per-run bookkeeping BEFORE any early return so nothing leaks if
+        # instrumentation is suppressed only at end time (started unsuppressed).
+        span = self._spans_by_run.pop(run.id, None)
+        captured_context = self._context_by_run.pop(run.id, {})
+        is_interrupt = bool(self._interrupt_run_ids.pop(run.id, False))
+        if span is None:
+            return
+
+        # Skip the export/processing work while suppressed, but still end the span —
+        # an already-started span must be closed or it leaks.
+        if not context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+            try:
+                _update_span(span, run, captured_context, is_interrupt=is_interrupt)
+
+                # Send final span data with both input and output
+                output_data = None
+                if run.outputs:
+                    if isinstance(run.outputs, dict):
+                        output_data = (
+                            run.outputs.get("output")
+                            or run.outputs.get("result")
+                            or run.outputs
+                        )
+                    else:
+                        output_data = run.outputs
+
+                self._send_span_data_to_api(
+                    span=span, input_data=run.inputs, output_data=output_data
+                )
+
+            except Exception:
+                logger.exception("Failed to update span with run data.")
+        # We can't use real time because the handler may be
+        # called in a background thread.
+        end_time_utc_nano = _as_utc_nano(run.end_time) if run.end_time else None
+        span.end(end_time=end_time_utc_nano)
+
+    def _persist_run(self, run: Run) -> None:
+        pass
+
+    def _handle_error(
+        self,
+        error: BaseException,
+        run_id: UUID,
+        forward: Callable[..., Run],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Run:
+        """Shared handling for the llm/chain/tool/retriever error callbacks.
+
+        A LangGraph control-flow signal (dynamic ``interrupt()`` / HITL, ``Command``,
+        graph delegation) is an intentional pause, not a failure: mark the span as an
+        interrupt and keep its status OK (finalized in ``_end_trace``). Genuine errors
+        are recorded as exceptions.
+        """
+        span = self._spans_by_run.get(run_id)
+        if _is_graph_interrupt(error):
+            # Any control-flow bubble-up (interrupt/HITL, Command, delegation) is
+            # intentional, not a failure: keep the span OK. Guard on a tracked span so
+            # the flag can't leak for an untracked run, and tag the `langgraph.interrupt`
+            # marker only for an actual HITL interrupt() (not Command/delegation).
+            if span is not None:
+                self._interrupt_run_ids[run_id] = True
+                if _is_hitl_interrupt(error):
+                    span.set_attribute("langgraph.interrupt", True)
+                    span.add_event("interrupt", {"langgraph.interrupt": True})
+        elif span is not None:
+            _record_exception(span, error)
+        return forward(error, *args, run_id=run_id, **kwargs)
+
+    def on_llm_error(
+        self, error: BaseException, *args: Any, run_id: UUID, **kwargs: Any
+    ) -> Run:
+        return self._handle_error(error, run_id, super().on_llm_error, *args, **kwargs)
+
+    def on_chain_error(
+        self, error: BaseException, *args: Any, run_id: UUID, **kwargs: Any
+    ) -> Run:
+        return self._handle_error(error, run_id, super().on_chain_error, *args, **kwargs)
+
+    def on_retriever_error(
+        self, error: BaseException, *args: Any, run_id: UUID, **kwargs: Any
+    ) -> Run:
+        return self._handle_error(
+            error, run_id, super().on_retriever_error, *args, **kwargs
+        )
+
+    def on_tool_error(
+        self, error: BaseException, *args: Any, run_id: UUID, **kwargs: Any
+    ) -> Run:
+        return self._handle_error(error, run_id, super().on_tool_error, *args, **kwargs)
+
+    def on_interrupt(self, event: Any = None, *args: Any, **kwargs: Any) -> None:
+        """Handle LangGraph's graph-lifecycle interrupt callback (langgraph >= 1.2).
+
+        LangGraph dispatches ``on_interrupt`` to every registered callback handler on
+        a HITL pause; implementing it avoids an ``AttributeError`` log each interrupt
+        and marks the graph run's span. The permissive signature tolerates callback
+        shape differences across langgraph versions.
+        """
+        self._mark_graph_lifecycle(event, "interrupt")
+
+    def on_resume(self, event: Any = None, *args: Any, **kwargs: Any) -> None:
+        """Handle LangGraph's graph-lifecycle resume callback (langgraph >= 1.2)."""
+        self._mark_graph_lifecycle(event, "resume")
+
+    def _mark_graph_lifecycle(self, event: Any, kind: str) -> None:
+        run_id = getattr(event, "run_id", None)
+        span = self._spans_by_run.get(run_id) if run_id is not None else None
+        if span is not None:
+            span.add_event(f"langgraph.{kind}")
+
+    def on_chat_model_start(self, *args: Any, **kwargs: Any) -> Run:
+        """
+        This emulates the behavior of the LangChainTracer.
+        https://github.com/langchain-ai/langchain/blob/c01467b1f4f9beae8f1edb105b17aa4f36bf6573/libs/core/langchain_core/tracers/langchain.py#L115
+
+        Although this method exists on the parent class, i.e. `BaseTracer`,
+        it requires setting `self._schema_format = "original+chat"`.
+        https://github.com/langchain-ai/langchain/blob/c01467b1f4f9beae8f1edb105b17aa4f36bf6573/libs/core/langchain_core/tracers/base.py#L170
+
+        But currently self._schema_format is marked for internal use.
+        https://github.com/langchain-ai/langchain/blob/c01467b1f4f9beae8f1edb105b17aa4f36bf6573/libs/core/langchain_core/tracers/base.py#L60
+        """  # noqa: E501
+        return LangChainTracer.on_chat_model_start(self, *args, **kwargs)  # type: ignore
+
+
+try:
+    from langgraph.errors import GraphBubbleUp as _GraphBubbleUp
+except Exception:  # langgraph is optional / older versions may differ
+    _GraphBubbleUp = None
+
+try:
+    from langgraph.errors import GraphInterrupt as _GraphInterrupt
+except Exception:
+    _GraphInterrupt = None
+
+
+def _is_hitl_interrupt(error: BaseException) -> bool:
+    """True only for a dynamic ``interrupt()`` (HITL pause) — a subset of the
+    control-flow bubble-ups; used to scope the ``langgraph.interrupt`` marker so it
+    does not also tag ``Command``/graph-delegation handoffs."""
+    return _GraphInterrupt is not None and isinstance(error, _GraphInterrupt)
+
+
+def _is_graph_interrupt(error: BaseException) -> bool:
+    """True for LangGraph control-flow signals (dynamic ``interrupt()``/HITL,
+    ``Command``, graph delegation) which are intentional pauses, not errors."""
+    return _GraphBubbleUp is not None and isinstance(error, _GraphBubbleUp)
+
+
+@audit_timing  # type: ignore
+def _record_exception(span: Span, error: BaseException) -> None:
+    if isinstance(error, Exception):
+        span.record_exception(error)
+        return
+    exception_type = error.__class__.__name__
+    exception_message = str(error)
+    if not exception_message:
+        exception_message = repr(error)
+    attributes: Dict[str, AttributeValue] = {
+        OTELSpanAttributes.EXCEPTION_TYPE: exception_type,
+        OTELSpanAttributes.EXCEPTION_MESSAGE: exception_message,
+        OTELSpanAttributes.EXCEPTION_ESCAPED: False,
+    }
+    try:
+        # See e.g. https://github.com/open-telemetry/opentelemetry-python/blob/e9c7c7529993cd13b4af661e2e3ddac3189a34d0/opentelemetry-sdk/src/opentelemetry/sdk/trace/__init__.py#L967  # noqa: E501
+        attributes[OTELSpanAttributes.EXCEPTION_STACKTRACE] = traceback.format_exc()
+    except Exception:
+        logger.exception("Failed to record exception stacktrace.")
+    span.add_event(name="exception", attributes=attributes)
+
+
+@audit_timing  # type: ignore
+def _update_span(
+    span: Span, run: Run, captured_context: Dict[str, Any], is_interrupt: bool = False
+) -> None:
+    if run.error is None or is_interrupt:
+        span.set_status(trace_api.StatusCode.OK)
+    else:
+        span.set_status(trace_api.Status(trace_api.StatusCode.ERROR, run.error))
+    span_kind = (
+        FiSpanKindValues.AGENT
+        if "agent" in run.name.lower()
+        else _langchain_run_type_to_span_kind(run.run_type)
+    )
+    span.set_attribute(GEN_AI_SPAN_KIND, span_kind.value)
+    span.set_attributes(dict(captured_context))
+    filtered_data, images, eval_input, query = _filter_images(
+        run.inputs.get("messages", [])
+    )
+
+    if not filtered_data:
+        if isinstance(run.inputs, dict):
+            if input_value := run.inputs.get("input"):
+                filtered_data = str(input_value)
+            elif query := run.inputs.get("query"):
+                filtered_data = str(query)
+            elif question := run.inputs.get("question"):
+                filtered_data = str(question)
+        else:
+            filtered_data = None
+
+    span.set_attributes(
+        dict(
+            _flatten(
+                chain(
+                    _as_span_input(filtered_data),
+                    _as_output(_convert_io(run.outputs)),
+                    _as_input_images(images),
+                    _as_eval_input(eval_input),
+                    _prompts(run.inputs),
+                    _input_messages(run.inputs),
+                    _output_messages(run.outputs),
+                    _prompt_template(run),
+                    _invocation_parameters(run),
+                    _model_name(run.extra),
+                    _token_counts(run.outputs),
+                    _function_calls(run.outputs),
+                    _tools(run),
+                    _retrieval_documents(run),
+                    _metadata(run),
+                    _as_raw_input_output(run),
+                    _as_query(query),
+                )
+            )
+        )
+    )
+
+
+def _langchain_run_type_to_span_kind(run_type: str) -> FiSpanKindValues:
+    try:
+        return FiSpanKindValues(run_type.upper())
+    except ValueError:
+        return FiSpanKindValues.UNKNOWN
+
+
+def stop_on_exception(
+    wrapped: Callable[..., Iterator[Tuple[str, Any]]],
+) -> Callable[..., Iterator[Tuple[str, Any]]]:
+    def wrapper(*args: Any, **kwargs: Any) -> Iterator[Tuple[str, Any]]:
+        start_time = time.perf_counter()
+        try:
+            yield from wrapped(*args, **kwargs)
+        except Exception:
+            logger.exception("Failed to get attribute.")
+        finally:
+            if _AUDIT_TIMING:
+                latency_ms = (time.perf_counter() - start_time) * 1000
+
+    return wrapper
+
+
+@stop_on_exception
+def _flatten(
+    key_values: Iterable[Tuple[str, Any]]
+) -> Iterator[Tuple[str, AttributeValue]]:
+    for key, value in key_values:
+        if value is None:
+            continue
+        if isinstance(value, Mapping):
+            for sub_key, sub_value in _flatten(value.items()):
+                yield f"{key}.{sub_key}", sub_value
+        elif isinstance(value, List) and any(
+            isinstance(item, Mapping) for item in value
+        ):
+            for index, sub_mapping in enumerate(value):
+                for sub_key, sub_value in _flatten(sub_mapping.items()):
+                    yield f"{key}.{index}.{sub_key}", sub_value
+        else:
+            if isinstance(value, Enum):
+                value = value.value
+            yield key, value
+
+
+@stop_on_exception
+def _as_input(values: Iterable[str]) -> Iterator[Tuple[str, str]]:
+    return zip((INPUT_VALUE, INPUT_MIME_TYPE), values)
+
+
+def _as_span_input(input: List[str]) -> Iterator[Tuple[str, Any]]:
+    yield INPUT_VALUE, json.dumps(input)
+
+
+@stop_on_exception
+def _as_output(values: Iterable[str]) -> Iterator[Tuple[str, str]]:
+    return zip((OUTPUT_VALUE, OUTPUT_MIME_TYPE), values)
+
+
+def _as_input_images(image_urls: List[str]) -> Iterator[Tuple[str, Any]]:
+    if image_urls:
+        yield INPUT_IMAGES, json.dumps(image_urls)
+
+
+def _as_eval_input(values: Iterable[str]) -> Iterator[Tuple[str, str]]:
+    yield INPUT_VALUE, json.dumps(values)
+
+
+def _as_raw_input_output(run: Run) -> Iterator[Tuple[str, Any]]:
+    if raw_input := run.inputs:
+        if isinstance(raw_input, dict):
+            yield INPUT_VALUE, safe_json_dumps(raw_input)
+        elif hasattr(raw_input, "__dict__"):
+            yield INPUT_VALUE, safe_json_dumps(raw_input.__dict__)
+    if raw_output := run.outputs:
+        if isinstance(raw_output, dict):
+            yield OUTPUT_VALUE, safe_json_dumps(raw_output)
+        elif hasattr(raw_output, "__dict__"):
+            yield OUTPUT_VALUE, safe_json_dumps(raw_output.__dict__)
+
+
+def _as_query(values: Iterable[str]) -> Iterator[Tuple[str, str]]:
+    if values:
+        yield INPUT_VALUE, safe_json_dumps(values)
+
+
+def _convert_io(obj: Optional[Mapping[str, Any]]) -> Iterator[str]:
+    if not obj:
+        return
+    assert isinstance(obj, dict), f"expected dict, found {type(obj)}"
+    if len(obj) == 1 and isinstance(value := next(iter(obj.values())), str):
+        yield value
+    else:
+        obj = dict(_replace_nan(obj))
+        yield safe_json_dumps(obj)
+        yield FiMimeTypeValues.JSON.value
+
+
+def _replace_nan(obj: Mapping[str, Any]) -> Iterator[Tuple[str, Any]]:
+    for k, v in obj.items():
+        if isinstance(v, float) and not math.isfinite(v):
+            yield k, None
+        else:
+            yield k, v
+
+
+@stop_on_exception
+def _prompts(inputs: Optional[Mapping[str, Any]]) -> Iterator[Tuple[str, List[str]]]:
+    """Yields prompts if present."""
+    if not inputs:
+        return
+    assert hasattr(inputs, "get"), f"expected Mapping, found {type(inputs)}"
+    if prompts := inputs.get("prompts"):
+        yield GEN_AI_PROMPTS, prompts
+
+
+@stop_on_exception
+def _input_messages(
+    inputs: Optional[Mapping[str, Any]],
+) -> Iterator[Tuple[str, List[Dict[str, Any]]]]:
+    """Yields chat messages if present."""
+    if not inputs:
+        return
+    assert hasattr(inputs, "get"), f"expected Mapping, found {type(inputs)}"
+    # There may be more than one set of messages. We'll use just the first set.
+    if not (multiple_messages := inputs.get("messages")):
+        return
+    assert isinstance(
+        multiple_messages, Iterable
+    ), f"expected Iterable, found {type(multiple_messages)}"
+    # This will only get the first set of messages.
+    if not (first_messages := next(iter(multiple_messages), None)):
+        return
+    parsed_messages = []
+    if isinstance(first_messages, list):
+        for message_data in first_messages:
+            if isinstance(message_data, BaseMessage):
+                parsed_messages.append(
+                    dict(_parse_message_data(message_data.to_json()))
+                )
+            elif hasattr(message_data, "get"):
+                parsed_messages.append(dict(_parse_message_data(message_data)))
+            else:
+                raise ValueError(
+                    f"failed to parse message of type {type(message_data)}"
+                )
+    elif isinstance(first_messages, BaseMessage):
+        parsed_messages.append(dict(_parse_message_data(first_messages.to_json())))
+    elif hasattr(first_messages, "get"):
+        parsed_messages.append(dict(_parse_message_data(first_messages)))
+    else:
+        raise ValueError(f"failed to parse messages of type {type(first_messages)}")
+    if parsed_messages:
+        yield GEN_AI_INPUT_MESSAGES, parsed_messages
+
+
+@stop_on_exception
+def _output_messages(
+    outputs: Optional[Mapping[str, Any]],
+) -> Iterator[Tuple[str, List[Dict[str, Any]]]]:
+    """Yields chat messages if present."""
+    if not outputs:
+        return
+    assert hasattr(outputs, "get"), f"expected Mapping, found {type(outputs)}"
+    # There may be more than one set of generations. We'll use just the first set.
+    if not (multiple_generations := outputs.get("generations")):
+        return
+    assert isinstance(
+        multiple_generations, Iterable
+    ), f"expected Iterable, found {type(multiple_generations)}"
+    # This will only get the first set of generations.
+    if not (first_generations := next(iter(multiple_generations), None)):
+        return
+    assert isinstance(
+        first_generations, Iterable
+    ), f"expected Iterable, found {type(first_generations)}"
+    parsed_messages = []
+    for generation in first_generations:
+        assert hasattr(generation, "get"), f"expected Mapping, found {type(generation)}"
+        if message_data := generation.get("message"):
+            if isinstance(message_data, BaseMessage):
+                parsed_messages.append(
+                    dict(_parse_message_data(message_data.to_json()))
+                )
+            elif hasattr(message_data, "get"):
+                parsed_messages.append(dict(_parse_message_data(message_data)))
+            else:
+                raise ValueError(f"fail to parse message of type {type(message_data)}")
+    if parsed_messages:
+        yield GEN_AI_OUTPUT_MESSAGES, parsed_messages
+
+
+@stop_on_exception
+def _parse_message_data(
+    message_data: Optional[Mapping[str, Any]]
+) -> Iterator[Tuple[str, Any]]:
+    """Parses message data to grab message role, content, etc."""
+    if not message_data:
+        return
+    assert hasattr(message_data, "get"), f"expected Mapping, found {type(message_data)}"
+    id_ = message_data.get("id")
+    assert isinstance(id_, List), f"expected list, found {type(id_)}"
+    message_class_name = id_[-1]
+    if message_class_name.startswith("HumanMessage"):
+        role = "user"
+    elif message_class_name.startswith("AIMessage"):
+        role = "assistant"
+    elif message_class_name.startswith("SystemMessage"):
+        role = "system"
+    elif message_class_name.startswith("FunctionMessage"):
+        role = "function"
+    elif message_class_name.startswith("ToolMessage"):
+        role = "tool"
+    elif message_class_name.startswith("ChatMessage"):
+        role = message_data["kwargs"]["role"]
+    else:
+        raise ValueError(f"Cannot parse message of type: {message_class_name}")
+    yield MESSAGE_ROLE, role
+    if kwargs := message_data.get("kwargs"):
+        assert hasattr(kwargs, "get"), f"expected Mapping, found {type(kwargs)}"
+        if content := kwargs.get("content"):
+            if isinstance(content, str):
+                yield MESSAGE_CONTENT, content
+            elif isinstance(content, list):
+                for i, obj in enumerate(content):
+                    assert hasattr(obj, "get"), f"expected Mapping, found {type(obj)}"
+                    for k, v in _get_attributes_from_message_content(obj):
+                        yield f"{MESSAGE_CONTENTS}.{i}.{k}", v
+        if additional_kwargs := kwargs.get("additional_kwargs"):
+            assert hasattr(
+                additional_kwargs, "get"
+            ), f"expected Mapping, found {type(additional_kwargs)}"
+            if function_call := additional_kwargs.get("function_call"):
+                assert hasattr(
+                    function_call, "get"
+                ), f"expected Mapping, found {type(function_call)}"
+                if name := function_call.get("name"):
+                    assert isinstance(name, str), f"expected str, found {type(name)}"
+                    yield MESSAGE_FUNCTION_CALL_NAME, name
+                if arguments := function_call.get("arguments"):
+                    assert isinstance(
+                        arguments, str
+                    ), f"expected str, found {type(arguments)}"
+                    yield MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON, arguments
+            if tool_calls := additional_kwargs.get("tool_calls"):
+                assert isinstance(
+                    tool_calls, Iterable
+                ), f"expected Iterable, found {type(tool_calls)}"
+                message_tool_calls = []
+                for tool_call in tool_calls:
+                    if message_tool_call := dict(_get_tool_call(tool_call)):
+                        message_tool_calls.append(message_tool_call)
+                if message_tool_calls:
+                    yield MESSAGE_TOOL_CALLS, message_tool_calls
+
+            # Add handling for tool_outputs
+            if tool_outputs := additional_kwargs.get("tool_outputs"):
+                assert isinstance(
+                    tool_outputs, Iterable
+                ), f"expected Iterable, found {type(tool_outputs)}"
+                yield "tool_outputs", safe_json_dumps(tool_outputs)
+
+            if audio := additional_kwargs.get("audio"):
+                yield MessageContentAttributes.MESSAGE_CONTENT_TYPE, "audio"
+                if audio_data := audio.get("data"):
+                    yield MessageContentAttributes.MESSAGE_CONTENT_AUDIO, audio_data
+                if transcript := audio.get("transcript"):
+                    yield MessageContentAttributes.MESSAGE_AUDIO_TRANSCRIPT, transcript
+
+
+@stop_on_exception
+def _get_tool_call(tool_call: Optional[Mapping[str, Any]]) -> Iterator[Tuple[str, Any]]:
+    if not tool_call:
+        return
+    assert hasattr(tool_call, "get"), f"expected Mapping, found {type(tool_call)}"
+    if function := tool_call.get("function"):
+        assert hasattr(function, "get"), f"expected Mapping, found {type(function)}"
+        if name := function.get("name"):
+            assert isinstance(name, str), f"expected str, found {type(name)}"
+            yield TOOL_CALL_FUNCTION_NAME, name
+        if arguments := function.get("arguments"):
+            assert isinstance(arguments, str), f"expected str, found {type(arguments)}"
+            yield TOOL_CALL_FUNCTION_ARGUMENTS_JSON, arguments
+
+
+@stop_on_exception
+def _prompt_template(run: Run) -> Iterator[Tuple[str, AttributeValue]]:
+    yield from _parse_prompt_template(run.inputs, run.serialized)
+
+
+@stop_on_exception
+def _parse_prompt_template(
+    inputs: Mapping[str, str],
+    serialized: Optional[Mapping[str, Any]],
+) -> Iterator[Tuple[str, AttributeValue]]:
+    if (
+        not serialized
+        or not isinstance(serialized, Mapping)
+        or not (kwargs := serialized.get("kwargs"))
+        or not isinstance(kwargs, Mapping)
+    ):
+        return
+    if _get_cls_name(prompt := kwargs.get("prompt")).endswith("PromptTemplate"):
+        yield from _parse_prompt_template(inputs, prompt)
+    elif _get_cls_name(serialized).endswith("ChatPromptTemplate"):
+        messages = kwargs.get("messages")
+        assert isinstance(messages, Sequence), f"expected list, found {type(messages)}"
+        # FIXME: Multiple templates are possible (and the templated messages can also be
+        # interleaved with user massages), but we only have room for one template.
+        message = messages[0]
+        assert isinstance(message, Mapping), f"expected dict, found {type(message)}"
+        if partial_variables := kwargs.get("partial_variables"):
+            assert isinstance(
+                partial_variables, Mapping
+            ), f"expected dict, found {type(partial_variables)}"
+            inputs = {**partial_variables, **inputs}
+        yield from _parse_prompt_template(inputs, message)
+    elif _get_cls_name(serialized).endswith("PromptTemplate") and isinstance(
+        (template := kwargs.get("template")), str
+    ):
+        yield GEN_AI_PROMPT_TEMPLATE_NAME, template
+        if input_variables := kwargs.get("input_variables"):
+            assert isinstance(
+                input_variables, list
+            ), f"expected list, found {type(input_variables)}"
+            template_variables = {}
+            for variable in input_variables:
+                if (value := inputs.get(variable)) is not None:
+                    template_variables[variable] = value
+            if template_variables:
+                yield GEN_AI_PROMPT_TEMPLATE_VARIABLES, safe_json_dumps(template_variables)
+
+
+@stop_on_exception
+def _invocation_parameters(run: Run) -> Iterator[Tuple[str, str]]:
+    """Yields invocation parameters if present."""
+    if run.run_type.lower() != "llm":
+        return
+    if not (extra := run.extra):
+        return
+    assert hasattr(extra, "get"), f"expected Mapping, found {type(extra)}"
+    if invocation_parameters := extra.get("invocation_params"):
+        assert isinstance(
+            invocation_parameters, Mapping
+        ), f"expected Mapping, found {type(invocation_parameters)}"
+        yield GEN_AI_REQUEST_PARAMETERS, safe_json_dumps(invocation_parameters)
+
+
+@stop_on_exception
+def _model_name(extra: Optional[Mapping[str, Any]]) -> Iterator[Tuple[str, str]]:
+    """Yields model name if present."""
+    if not extra:
+        return
+    assert hasattr(extra, "get"), f"expected Mapping, found {type(extra)}"
+    if not (invocation_params := extra.get("invocation_params")):
+        return
+    for key in ["model_name", "model"]:
+        if name := invocation_params.get(key):
+            yield GEN_AI_REQUEST_MODEL, name
+            return
+
+
+@stop_on_exception
+def _token_counts(outputs: Optional[Mapping[str, Any]]) -> Iterator[Tuple[str, int]]:
+    """Yields token count information if present."""
+    if not (
+        token_usage := (
+            _parse_token_usage_for_non_streaming_outputs(outputs)
+            or _parse_token_usage_for_streaming_outputs(outputs)
