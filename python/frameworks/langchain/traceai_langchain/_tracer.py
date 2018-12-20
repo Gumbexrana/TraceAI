@@ -847,3 +847,368 @@ def _token_counts(outputs: Optional[Mapping[str, Any]]) -> Iterator[Tuple[str, i
         token_usage := (
             _parse_token_usage_for_non_streaming_outputs(outputs)
             or _parse_token_usage_for_streaming_outputs(outputs)
+        )
+    ):
+        return
+    for attribute_name, keys in [
+        (
+            GEN_AI_USAGE_INPUT_TOKENS,
+            (
+                "prompt_tokens",
+                "input_tokens",  # Anthropic-specific key
+            ),
+        ),
+        (
+            GEN_AI_USAGE_OUTPUT_TOKENS,
+            (
+                "completion_tokens",
+                "output_tokens",  # Anthropic-specific key
+            ),
+        ),
+        (GEN_AI_USAGE_TOTAL_TOKENS, ("total_tokens",)),
+    ]:
+        if (token_count := _get_first_value(token_usage, keys)) is not None:
+            yield attribute_name, token_count
+
+
+def _parse_token_usage_for_non_streaming_outputs(
+    outputs: Optional[Mapping[str, Any]],
+) -> Any:
+    """
+    Parses output to get token usage information for non-streaming LLMs, i.e.,
+    when `stream_usage` is set to false.
+    """
+    if (
+        outputs
+        and hasattr(outputs, "get")
+        and (llm_output := outputs.get("llm_output"))
+        and hasattr(llm_output, "get")
+        and (
+            token_usage := _get_first_value(
+                llm_output,
+                (
+                    "token_usage",
+                    "usage",  # Anthropic-specific key
+                ),
+            )
+        )
+    ):
+        return token_usage
+    return None
+
+
+def _parse_token_usage_for_streaming_outputs(
+    outputs: Optional[Mapping[str, Any]],
+) -> Any:
+    """
+    Parses output to get token usage information for streaming LLMs, i.e., when
+    `stream_usage` is set to true.
+    """
+    if (
+        outputs
+        and hasattr(outputs, "get")
+        and (generations := outputs.get("generations"))
+        and hasattr(generations, "__getitem__")
+        and generations[0]
+        and hasattr(generations[0], "__getitem__")
+        and (generation := generations[0][0])
+        and hasattr(generation, "get")
+        and (message := generation.get("message"))
+        and hasattr(message, "get")
+        and (kwargs := message.get("kwargs"))
+        and hasattr(kwargs, "get")
+        and (token_usage := kwargs.get("usage_metadata"))
+    ):
+        return token_usage
+    return None
+
+
+@stop_on_exception
+def _function_calls(outputs: Optional[Mapping[str, Any]]) -> Iterator[Tuple[str, str]]:
+    """Yields function call information if present."""
+    if not outputs:
+        return
+    assert hasattr(outputs, "get"), f"expected Mapping, found {type(outputs)}"
+    try:
+        function_call_data = deepcopy(
+            outputs["generations"][0][0]["message"]["kwargs"]["additional_kwargs"][
+                "function_call"
+            ]
+        )
+        function_call_data["arguments"] = json.loads(function_call_data["arguments"])
+        yield GEN_AI_TOOL_CALL, safe_json_dumps(function_call_data)
+    except Exception:
+        pass
+
+
+@stop_on_exception
+def _tools(run: Run) -> Iterator[Tuple[str, str]]:
+    """Yields tool attributes if present."""
+    if run.run_type.lower() != "tool":
+        return
+    if not (serialized := run.serialized):
+        return
+    assert hasattr(serialized, "get"), f"expected Mapping, found {type(serialized)}"
+    if name := serialized.get("name"):
+        yield GEN_AI_TOOL_NAME, name
+    if description := serialized.get("description"):
+        yield GEN_AI_TOOL_DESCRIPTION, description
+
+
+@stop_on_exception
+def _retrieval_documents(run: Run) -> Iterator[Tuple[str, List[Mapping[str, Any]]]]:
+    if run.run_type.lower() != "retriever":
+        return
+    if not (outputs := run.outputs):
+        return
+    assert hasattr(outputs, "get"), f"expected Mapping, found {type(outputs)}"
+    documents = outputs.get("documents")
+    assert isinstance(
+        documents, Iterable
+    ), f"expected Iterable, found {type(documents)}"
+    yield RETRIEVAL_DOCUMENTS, [dict(_as_document(document)) for document in documents]
+
+
+@stop_on_exception
+def _metadata(run: Run) -> Iterator[Tuple[str, str]]:
+    """
+    Takes the LangChain chain metadata and adds it to the trace
+    """
+    if not run.extra or not (metadata := run.extra.get("metadata")):
+        return
+    assert isinstance(metadata, Mapping), f"expected Mapping, found {type(metadata)}"
+
+    # Add all metadata fields as individual span attributes
+    for key, value in metadata.items():
+        if value is not None:
+            # Convert value to string for span attributes
+            str_value = str(value)
+
+            # Map specific keys to standard attribute names
+            if key == "user_id":
+                yield "user.id", str_value
+            elif key == "session_id":
+                yield "session.id", str_value
+            elif key == "langgraph_node":
+                # Canonical graph-node enrichment, derived from LangGraph's own
+                # callback metadata — no node-function wrapping required. Emit the
+                # node-identity attributes only on the node's OWN chain run (its run
+                # is named after the node), not on nested LLM/tool child runs which
+                # inherit this metadata — otherwise consumers that count node-id
+                # spans would over-count. Children still keep the raw `langgraph_node`
+                # attribute below. The node's parent is captured by the span
+                # hierarchy (parent_run_id).
+                if run.name == str_value:
+                    yield GRAPH_NODE_NAME, str_value
+                    yield GRAPH_NODE_ID, str_value
+                yield f"{key}", str_value
+            else:
+                # Add other metadata with metadata prefix to avoid conflicts
+                yield f"{key}", str_value
+
+    # Handle legacy session ID keys for backward compatibility
+    if legacy_session_id := (
+        metadata.get(LANGCHAIN_SESSION_ID)
+        or metadata.get(LANGCHAIN_CONVERSATION_ID)
+        or metadata.get(LANGCHAIN_THREAD_ID)
+    ):
+        yield GEN_AI_CONVERSATION_ID, legacy_session_id
+
+    # Also include the full metadata as JSON for completeness
+    yield METADATA, safe_json_dumps(metadata)
+
+
+@stop_on_exception
+def _as_document(document: Any) -> Iterator[Tuple[str, Any]]:
+    if page_content := getattr(document, "page_content", None):
+        assert isinstance(
+            page_content, str
+        ), f"expected str, found {type(page_content)}"
+        yield DOCUMENT_CONTENT, page_content
+    if metadata := getattr(document, "metadata", None):
+        assert isinstance(
+            metadata, Mapping
+        ), f"expected Mapping, found {type(metadata)}"
+        yield DOCUMENT_METADATA, safe_json_dumps(metadata)
+
+
+def _as_utc_nano(dt: datetime) -> int:
+    return int(dt.astimezone(timezone.utc).timestamp() * 1_000_000_000)
+
+
+def _get_cls_name(serialized: Optional[Mapping[str, Any]]) -> str:
+    """
+    For a `Serializable` object, its class name, i.e. `cls.__name__`, is the last element of
+    its `lc_id`. See https://github.com/langchain-ai/langchain/blob/9e4a0e76f6aa9796ad7baa7f623ba98274676c6f/libs/core/langchain_core/load/serializable.py#L159
+
+    For example, for the class `langchain.llms.openai.OpenAI`, the id is
+    ["langchain", "llms", "openai", "OpenAI"], and `cls.__name__` is "OpenAI".
+    """  # noqa E501
+    if serialized is None or not hasattr(serialized, "get"):
+        return ""
+    if (
+        (id_ := serialized.get("id"))
+        and isinstance(id_, list)
+        and isinstance(id_[-1], str)
+    ):
+        return id_[-1]
+    return ""
+
+
+KeyType = TypeVar("KeyType")
+ValueType = TypeVar("ValueType")
+
+
+def _get_first_value(
+    mapping: Mapping[KeyType, ValueType], keys: Iterable[KeyType]
+) -> Optional[ValueType]:
+    """
+    Returns the first non-null value corresponding to an input key, or None if
+    no non-null value is found.
+    """
+    if not hasattr(mapping, "get"):
+        return None
+    return next(
+        (value for key in keys if (value := mapping.get(key)) is not None),
+        None,
+    )
+
+
+def _get_attributes_from_message_content(
+    content: Mapping[str, Any],
+) -> Iterator[Tuple[str, AttributeValue]]:
+    content = dict(content)
+    type_ = content.pop("type")
+    if type_ == "text":
+        yield f"{MESSAGE_CONTENT_TYPE}", "text"
+        if text := content.pop("text"):
+            yield f"{MESSAGE_CONTENT_TEXT}", text
+    elif type_ == "image_url":
+        yield f"{MESSAGE_CONTENT_TYPE}", "image"
+        if image := content.pop("image_url"):
+            for key, value in _get_attributes_from_image(image):
+                yield f"{MESSAGE_CONTENT_IMAGE}.{key}", value
+    elif type_ == "input_image":
+        yield f"{MESSAGE_CONTENT_TYPE}", "image"
+        if image_url := content.pop("image_url", None):
+            # Handle direct URL string for input_image type
+            yield f"{MESSAGE_CONTENT_IMAGE}", image_url
+    elif type_ == "input_audio":
+        if audio := content.pop("input_audio"):
+            yield f"{MESSAGE_CONTENT_TYPE}", "audio"
+            yield f"{MESSAGE_CONTENT_AUDIO}", audio.get("data", "")
+
+
+def _get_attributes_from_image(
+    image: Mapping[str, Any],
+) -> Iterator[Tuple[str, AttributeValue]]:
+    image = dict(image)
+    if url := image.pop("url"):
+        yield f"{IMAGE_URL}", url
+
+
+def _filter_images(messages: Any) -> Tuple[Any, List[str], str, str]:
+    filtered_data = []
+    images = []
+    eval_input = []
+    query = ""
+
+    if not messages or not isinstance(messages, list):
+        return messages, [], "", ""
+
+    for message_group in messages:
+        if not isinstance(message_group, list):
+            continue
+
+        for message in message_group:
+            if isinstance(message, dict):
+                kwargs = message.get("kwargs", {})
+                if not isinstance(kwargs, dict):
+                    continue
+
+                content = kwargs.get("content")
+                if isinstance(content, str):
+                    filtered_data.append({"type": "text", "text": content})
+                    eval_input.append(content)
+                elif isinstance(content, list):
+                    for obj in content:
+                        if not isinstance(obj, dict):
+                            continue
+
+                        if obj.get("type") == "text":
+                            filtered_data.append(obj)
+                            text = obj.get("text")
+                            if text:
+                                eval_input.append(str(text))
+                        elif obj.get("type") == "image_url":
+                            image_url = obj.get("image_url", {}).get("url")
+                            if image_url:
+                                images.append(image_url)
+                                filtered_data.append(
+                                    {"type": "text", "text": f"[Image: {image_url}]"}
+                                )
+
+    if eval_input and len(eval_input) > 0:
+        query = eval_input[0]
+    eval_input = " | ".join(map(str, eval_input))
+    return filtered_data, images, eval_input, query
+
+
+LANGCHAIN_SESSION_ID = "session_id"
+LANGCHAIN_CONVERSATION_ID = "conversation_id"
+LANGCHAIN_THREAD_ID = "thread_id"
+
+DOCUMENT_CONTENT = DocumentAttributes.DOCUMENT_CONTENT
+DOCUMENT_ID = DocumentAttributes.DOCUMENT_ID
+DOCUMENT_METADATA = DocumentAttributes.DOCUMENT_METADATA
+DOCUMENT_SCORE = DocumentAttributes.DOCUMENT_SCORE
+EMBEDDING_EMBEDDINGS = SpanAttributes.EMBEDDING_EMBEDDINGS
+EMBEDDING_MODEL_NAME = SpanAttributes.EMBEDDING_MODEL_NAME
+EMBEDDING_TEXT = EmbeddingAttributes.EMBEDDING_TEXT
+EMBEDDING_VECTOR = EmbeddingAttributes.EMBEDDING_VECTOR
+IMAGE_URL = ImageAttributes.IMAGE_URL
+INPUT_MIME_TYPE = SpanAttributes.INPUT_MIME_TYPE
+INPUT_VALUE = SpanAttributes.INPUT_VALUE
+INPUT_IMAGES = SpanAttributes.INPUT_IMAGES
+OUTPUT_VALUE = SpanAttributes.OUTPUT_VALUE
+GEN_AI_TOOL_CALL = SpanAttributes.GEN_AI_TOOL_CALL
+GEN_AI_INPUT_MESSAGES = SpanAttributes.GEN_AI_INPUT_MESSAGES
+GEN_AI_REQUEST_PARAMETERS = SpanAttributes.GEN_AI_REQUEST_PARAMETERS
+GEN_AI_REQUEST_MODEL = SpanAttributes.GEN_AI_REQUEST_MODEL
+GEN_AI_OUTPUT_MESSAGES = SpanAttributes.GEN_AI_OUTPUT_MESSAGES
+GEN_AI_PROMPTS = SpanAttributes.GEN_AI_PROMPTS
+GEN_AI_PROMPT_TEMPLATE_NAME = SpanAttributes.GEN_AI_PROMPT_TEMPLATE_NAME
+GEN_AI_PROMPT_TEMPLATE_VARIABLES = SpanAttributes.GEN_AI_PROMPT_TEMPLATE_VARIABLES
+GEN_AI_USAGE_OUTPUT_TOKENS = SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
+GEN_AI_USAGE_INPUT_TOKENS = SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS
+GEN_AI_USAGE_TOTAL_TOKENS = SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS
+MESSAGE_CONTENT = MessageAttributes.MESSAGE_CONTENT
+MESSAGE_CONTENTS = MessageAttributes.MESSAGE_CONTENTS
+MESSAGE_CONTENT_IMAGE = MessageContentAttributes.MESSAGE_CONTENT_IMAGE
+MESSAGE_CONTENT_AUDIO = MessageContentAttributes.MESSAGE_CONTENT_AUDIO
+MESSAGE_CONTENT_TEXT = MessageContentAttributes.MESSAGE_CONTENT_TEXT
+MESSAGE_CONTENT_TYPE = MessageContentAttributes.MESSAGE_CONTENT_TYPE
+MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON = (
+    MessageAttributes.MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON
+)
+MESSAGE_FUNCTION_CALL_NAME = MessageAttributes.MESSAGE_FUNCTION_CALL_NAME
+MESSAGE_NAME = MessageAttributes.MESSAGE_NAME
+MESSAGE_ROLE = MessageAttributes.MESSAGE_ROLE
+MESSAGE_TOOL_CALLS = MessageAttributes.MESSAGE_TOOL_CALLS
+METADATA = SpanAttributes.METADATA
+GEN_AI_SPAN_KIND = SpanAttributes.GEN_AI_SPAN_KIND
+GRAPH_NODE_ID = SpanAttributes.GEN_AI_AGENT_GRAPH_NODE_ID
+GRAPH_NODE_NAME = SpanAttributes.GEN_AI_AGENT_GRAPH_NODE_NAME
+OUTPUT_MIME_TYPE = SpanAttributes.OUTPUT_MIME_TYPE
+RERANKER_INPUT_DOCUMENTS = RerankerAttributes.RERANKER_INPUT_DOCUMENTS
+RERANKER_MODEL_NAME = RerankerAttributes.RERANKER_MODEL_NAME
+RERANKER_OUTPUT_DOCUMENTS = RerankerAttributes.RERANKER_OUTPUT_DOCUMENTS
+RERANKER_QUERY = RerankerAttributes.RERANKER_QUERY
+RERANKER_TOP_K = RerankerAttributes.RERANKER_TOP_K
+RETRIEVAL_DOCUMENTS = SpanAttributes.RETRIEVAL_DOCUMENTS
+GEN_AI_CONVERSATION_ID = SpanAttributes.GEN_AI_CONVERSATION_ID
+TOOL_CALL_FUNCTION_ARGUMENTS_JSON = ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON
+TOOL_CALL_FUNCTION_NAME = ToolCallAttributes.TOOL_CALL_FUNCTION_NAME
+GEN_AI_TOOL_DESCRIPTION = SpanAttributes.GEN_AI_TOOL_DESCRIPTION
+GEN_AI_TOOL_NAME = SpanAttributes.GEN_AI_TOOL_NAME
+TOOL_PARAMETERS = SpanAttributes.TOOL_PARAMETERS

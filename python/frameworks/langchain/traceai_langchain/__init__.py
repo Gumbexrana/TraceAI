@@ -1,0 +1,123 @@
+import logging
+from typing import Any, Callable, Collection, List, Optional
+from uuid import UUID
+
+import langchain_core
+from fi_instrumentation import TraceConfig
+from fi_instrumentation.instrumentation._protect_wrapper import GuardrailProtectWrapper
+from langchain_core.callbacks import BaseCallbackManager
+from langchain_core.runnables.config import var_child_runnable_config  # noqa F401
+from opentelemetry import trace as trace_api
+from opentelemetry.instrumentation.instrumentor import BaseInstrumentor  # type: ignore
+from opentelemetry.trace import Span
+from traceai_langchain._tracer import FiTracer
+from traceai_langchain.package import _instruments
+from traceai_langchain.version import __version__
+from wrapt import wrap_function_wrapper  # type: ignore
+
+# LangGraph instrumentation exports
+from traceai_langchain._langgraph import (
+    LangGraphInstrumentor,
+    LangGraphAttributes,
+)
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
+__all__ = [
+    "LangChainInstrumentor",
+    "LangGraphInstrumentor",
+    "LangGraphAttributes",
+    "get_current_span",
+    "get_ancestor_spans",
+]
+
+_MODULE = "langchain_core"
+
+
+class LangChainInstrumentor(BaseInstrumentor):  # type: ignore
+    """
+    An instrumentor for LangChain
+    """
+
+    def instrumentation_dependencies(self) -> Collection[str]:
+        return _instruments
+
+    def _instrument(self, **kwargs: Any) -> None:
+        if not (tracer_provider := kwargs.get("tracer_provider")):
+            tracer_provider = trace_api.get_tracer_provider()
+        if not (config := kwargs.get("config")):
+            config = TraceConfig()
+        else:
+            assert isinstance(config, TraceConfig)
+
+        try:
+            from fi.evals import Protect
+        except ImportError:
+            logger.warning("ai-evaluation is not installed, please install it to trace protect")
+            Protect = None
+        from fi_instrumentation.instrumentation._tracers import FITracer
+        from traceai_langchain._tracer import FiTracer as LangChainFiTracer
+
+        self.fi_tracer = FITracer(
+            trace_api.get_tracer(__name__, __version__, tracer_provider),
+            config=config,
+        )
+        self._tracer: Optional[LangChainFiTracer] = LangChainFiTracer(self.fi_tracer)
+        self._original_callback_manager_init = BaseCallbackManager.__init__
+        wrap_function_wrapper(
+            module="langchain_core.callbacks",
+            name="BaseCallbackManager.__init__",
+            wrapper=_BaseCallbackManagerInit(self._tracer),
+        )
+        if Protect is not None:
+            self._original_protect = Protect.protect
+            wrap_function_wrapper(
+                module="fi.evals",
+                name="Protect.protect",
+                wrapper=GuardrailProtectWrapper(self._tracer),
+            )
+        else:
+            self._original_protect = None
+
+    def _uninstrument(self, **kwargs: Any) -> None:
+        langchain_core.callbacks.BaseCallbackManager.__init__ = self._original_callback_manager_init  # type: ignore
+        self._original_callback_manager_init = None  # type: ignore
+        self._tracer = None
+        self.fi_tracer = None
+
+    def get_span(self, run_id: UUID) -> Optional[Span]:
+        return self._tracer.get_span(run_id) if self._tracer else None
+
+    def get_ancestors(self, run_id: UUID) -> List[Span]:
+        ancestors: List[Span] = []
+        tracer = self._tracer
+        assert tracer
+
+        run = tracer.run_map.get(str(run_id))
+        if not run:
+            return ancestors
+
+        ancestor_run_id = run.parent_run_id  # start with the first ancestor
+
+        while ancestor_run_id:
+            span = self.get_span(ancestor_run_id)
+            if span:
+                ancestors.append(span)
+
+            run = tracer.run_map.get(str(ancestor_run_id))
+            if not run:
+                break
+            ancestor_run_id = run.parent_run_id
+        return ancestors
+
+
+class _BaseCallbackManagerInit:
+    __slots__ = ("_tracer",)
+
+    def __init__(self, tracer: "FiTracer"):
+        self._tracer = tracer
+
+    def __call__(
+        self,
+        wrapped: Callable[..., None],
