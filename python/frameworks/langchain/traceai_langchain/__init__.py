@@ -121,3 +121,57 @@ class _BaseCallbackManagerInit:
     def __call__(
         self,
         wrapped: Callable[..., None],
+        instance: "BaseCallbackManager",
+        args: Any,
+        kwargs: Any,
+    ) -> None:
+        wrapped(*args, **kwargs)
+        for handler in instance.inheritable_handlers:
+            # Handlers may be copied when new managers are created, so we
+            # don't want to keep adding. E.g. see the following location.
+            # https://github.com/langchain-ai/langchain/blob/5c2538b9f7fb64afed2a918b621d9d8681c7ae32/libs/core/langchain_core/callbacks/manager.py#L1876  # noqa: E501
+            if isinstance(handler, type(self._tracer)):
+                break
+        else:
+            instance.add_handler(self._tracer, True)
+
+
+def get_current_span() -> Optional[Span]:
+    import langchain_core
+
+    run_id: Optional[UUID] = None
+    config = langchain_core.runnables.config.var_child_runnable_config.get()
+    if not isinstance(config, dict):
+        return None
+    for v in config.values():
+        if not isinstance(v, langchain_core.callbacks.BaseCallbackManager):
+            continue
+        if run_id := v.parent_run_id:
+            break
+    if not run_id:
+        return None
+    return LangChainInstrumentor().get_span(run_id)
+
+
+def get_ancestor_spans() -> List[Span]:
+    """
+    Retrieve the ancestor spans for the current LangChain run.
+
+    This function traverses the LangChain run tree from the current run's parent up to the root,
+    collecting the spans associated with each ancestor run. The list is ordered from the immediate
+    parent of the current run to the root of the run tree.
+    """
+    import langchain_core
+
+    run_id: Optional[UUID] = None
+    config = langchain_core.runnables.config.var_child_runnable_config.get()
+    if not isinstance(config, dict):
+        return None
+    for v in config.values():
+        if not isinstance(v, langchain_core.callbacks.BaseCallbackManager):
+            continue
+        if run_id := v.parent_run_id:
+            break
+    if not run_id:
+        return []
+    return LangChainInstrumentor().get_ancestors(run_id)
