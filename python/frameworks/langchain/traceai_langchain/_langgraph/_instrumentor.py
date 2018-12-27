@@ -37,3 +37,21 @@ class LangGraphInstrumentor(BaseInstrumentor):
         return cls._instance
 
     def instrumentation_dependencies(self) -> Collection[str]:
+        return _instruments
+
+    def _instrument(self, **kwargs: Any) -> None:
+        self._is_instrumented = True
+        if not LangGraphInstrumentor._deprecation_logged:
+            LangGraphInstrumentor._deprecation_logged = True
+            logger.warning(
+                "LangGraphInstrumentor is deprecated and is now a no-op. LangGraph "
+                "node/tool/LLM spans are captured automatically by LangChainInstrumentor; "
+                "you can remove the LangGraphInstrumentor().instrument() call."
+            )
+
+    def _uninstrument(self, **kwargs: Any) -> None:
+        self._is_instrumented = False
+
+    @property
+    def is_instrumented(self) -> bool:
+        return self._is_instrumented
