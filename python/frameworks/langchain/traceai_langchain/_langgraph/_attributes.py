@@ -114,3 +114,54 @@ class LangGraphAttributes:
     # Cost Tracking
     # ==========================================================================
     COST_NODE = "langgraph.cost.node"
+    COST_MODEL = "langgraph.cost.model"
+    COST_INPUT_TOKENS = "langgraph.cost.input_tokens"
+    COST_OUTPUT_TOKENS = "langgraph.cost.output_tokens"
+    COST_TOTAL_USD = "langgraph.cost.total_usd"
+    COST_CACHED_TOKENS = "langgraph.cost.cached_tokens"
+
+    # ==========================================================================
+    # Performance Metrics
+    # ==========================================================================
+    PERF_NODE = "langgraph.perf.node"
+    PERF_DURATION_MS = "langgraph.perf.duration_ms"
+    PERF_START_TIME = "langgraph.perf.start_time"
+    PERF_END_TIME = "langgraph.perf.end_time"
+    PERF_QUEUE_TIME_MS = "langgraph.perf.queue_time_ms"
+
+    # ==========================================================================
+    # Memory Tracking (UNIQUE - no competitor has this)
+    # ==========================================================================
+    MEMORY_STATE_SIZE_BYTES = "langgraph.memory.state_size_bytes"
+    MEMORY_STATE_SIZE_JSON_BYTES = "langgraph.memory.state_size_json_bytes"
+    MEMORY_TOP_ALLOCATIONS = "langgraph.memory.top_allocations"
+    MEMORY_GROWTH_WARNING = "langgraph.memory.growth_warning"
+    MEMORY_PEAK_BYTES = "langgraph.memory.peak_bytes"
+
+    # ==========================================================================
+    # Agent Health
+    # ==========================================================================
+    HEALTH_ELAPSED_SECONDS = "langgraph.health.elapsed_seconds"
+    HEALTH_SUPERSTEP_COUNT = "langgraph.health.superstep_count"
+    HEALTH_WARNINGS = "langgraph.health.warnings"
+    HEALTH_STATUS = "langgraph.health.status"  # healthy/warning/critical
+
+    # ==========================================================================
+    # Error & Recovery
+    # ==========================================================================
+    ERROR_NODE = "langgraph.error.node"
+    ERROR_SUPERSTEP = "langgraph.error.superstep"
+    ERROR_RECOVERABLE = "langgraph.error.recoverable"
+    RECOVERY_CHECKPOINT_ID = "langgraph.recovery.checkpoint_id"
+    RECOVERY_RETRY_COUNT = "langgraph.recovery.retry_count"
+
+
+# Span kind values for LangGraph
+class LangGraphSpanKind:
+    """Span kind values specific to LangGraph."""
+    GRAPH = "LANGGRAPH"
+    NODE = "LANGGRAPH_NODE"
+    SUPERSTEP = "LANGGRAPH_SUPERSTEP"
+    CHECKPOINT = "LANGGRAPH_CHECKPOINT"
+    INTERRUPT = "LANGGRAPH_INTERRUPT"
+    SUBGRAPH = "LANGGRAPH_SUBGRAPH"
