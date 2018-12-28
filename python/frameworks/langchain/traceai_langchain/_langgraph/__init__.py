@@ -8,3 +8,8 @@ handling). ``LangGraphInstrumentor`` is retained as a deprecated no-op shim.
 from traceai_langchain._langgraph._instrumentor import LangGraphInstrumentor
 from traceai_langchain._langgraph._attributes import LangGraphAttributes, LangGraphSpanKind
 
+__all__ = [
+    "LangGraphInstrumentor",
+    "LangGraphAttributes",
+    "LangGraphSpanKind",
+]
