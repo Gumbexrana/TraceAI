@@ -12,3 +12,10 @@ packages = [
 [tool.poetry.dependencies]
 python = ">3.9, <3.14"
 litellm = ">=1.43.0"
+fi-instrumentation-otel = ">=0.1.11"
+
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
