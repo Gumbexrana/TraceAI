@@ -112,3 +112,52 @@ async def async_conversation_completion():
 
 def completion_with_retry():
     return litellm.completion_with_retries(
+        model="gpt-3.5-turbo",
+        messages=[{"content": "What's the highest grossing film ever", "role": "user"}],
+    )
+
+
+def embedding_call():
+    return litellm.embedding(
+        model="text-embedding-ada-002", input=["good morning from litellm"]
+    )
+
+
+async def async_embedding_call():
+    return await litellm.aembedding(
+        model="text-embedding-ada-002", input=["good morning from litellm"]
+    )
+
+
+def image_generation_call():
+    return litellm.image_generation(model="dall-e-2", prompt="cute baby otter")
+
+
+async def async_image_generation_call():
+    return await litellm.aimage_generation(model="dall-e-2", prompt="cute baby otter")
+
+
+trace_provider = register(
+    project_type=ProjectType.EXPERIMENT,
+    # eval_tags=eval_tags,
+    project_name="FUTURE_AGI",
+    project_version_name="v1",
+)
+
+# Initialize the Lite LLM instrumentor
+LiteLLMInstrumentor().instrument(tracer_provider=trace_provider)
+
+simple_completion()
+conversation_completion()
+completion_with_retry()
+embedding_call()
+image_generation_call()
+
+
+async def main():
+    await async_conversation_completion()
+    await async_embedding_call()
+    await async_image_generation_call()
+
+
+asyncio.run(main())
