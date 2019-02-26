@@ -1,0 +1,24 @@
+"""
+TraceAI LiveKit integration.
+
+This package provides integration between LiveKit and Future AGI's tracing system,
+allowing LiveKit applications to send telemetry data with proper attribute mapping.
+"""
+
+from .exporters import (
+    BaseMappedSpanExporter,
+    MappedGRPCSpanExporter,
+    MappedHTTPSpanExporter,
+)
+from .integration import (
+    create_mapped_grpc_exporter,
+    create_mapped_http_exporter,
+    enable_fi_attribute_mapping,
+    enable_grpc_attribute_mapping,
+    enable_http_attribute_mapping,
+    flush_on_job_shutdown,
+)
+
+__version__ = "0.1.2"
+
+__all__ = [
