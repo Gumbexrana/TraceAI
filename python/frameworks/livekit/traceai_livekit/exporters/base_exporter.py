@@ -284,3 +284,126 @@ def _map_attributes_to_fi_conventions(attributes: Dict[str, Any]) -> Dict[str, A
 
     found, participant_identity = _first(attributes, LK_PARTICIPANT_IDENTITY)
     if found:
+        mapped[SpanAttributes.USER_ID] = participant_identity
+
+    # 6. Metadata Aggregation
+    metadata: Dict[str, Any] = {}
+    
+    # Collect all LiveKit specific keys into metadata
+    metadata_keys = [
+        LK_SPEECH_ID, LK_AGENT_LABEL, LK_JOB_ID, LK_AGENT_NAME, LK_SESSION_OPTIONS,
+        LK_PARTICIPANT_ID, LK_PARTICIPANT_KIND,
+        LK_INSTRUCTIONS, LK_SPEECH_INTERRUPTED,
+        LK_TTS_STREAMING, LK_TTS_LABEL,
+        LK_EOU_DELAY, LK_EOU_LANGUAGE, LK_TRANSCRIPT_CONFIDENCE, LK_TRANSCRIPTION_DELAY, LK_END_OF_TURN_DELAY,
+        LK_USER_TRANSCRIPT, # Might be redundant with input, but good context
+        LK_FUNCTION_TOOL_IS_ERROR
+    ]
+
+    for key in metadata_keys:
+        # A renamed key is a (new name, earlier name) tuple; each name present is recorded as is.
+        for name in (key if isinstance(key, tuple) else (key,)):
+            if name in attributes:
+                metadata[name] = attributes[name]
+
+    # Also include any "metrics" attributes if they exist
+    for key in attributes:
+         if "metrics" in key or "lk.eou" in key:
+              metadata[key] = attributes[key]
+
+    # Merge with existing metadata
+    if metadata:
+        existing = attributes.get(SpanAttributes.METADATA)
+        try:
+            if isinstance(existing, str):
+                existing = json.loads(existing)
+            if isinstance(existing, dict):
+                metadata = {**existing, **metadata}
+        except Exception:
+            pass
+        mapped[SpanAttributes.METADATA] = _ensure_json_string(metadata)
+
+    # 7. Span Kind Determination (fi.span.kind)
+    if SpanAttributes.GEN_AI_SPAN_KIND not in mapped:
+        span_kind = "UNKNOWN"
+        
+        # Check based on attribute presence or span name (if available in attributes? No, span name is on the Span object)
+        # We infer from unique attributes.
+        
+        if LK_FUNCTION_TOOL_NAME in attributes:
+            span_kind = "TOOL"
+        elif _has(attributes, LK_CHAT_CTX) or ATTR_GEN_AI_REQUEST_MODEL in attributes:
+            span_kind = "LLM"
+        elif _has(attributes, LK_TTS_INPUT_TEXT):
+             # TTS is technically model inference, map to LLM for now or generic
+             span_kind = "LLM" 
+        elif _has(attributes, LK_USER_INPUT) or LK_SPEECH_ID in attributes:
+             # Assistant Turn -> CHAIN
+             span_kind = "CHAIN"
+        elif LK_JOB_ID in attributes and _has(attributes, LK_ROOM_NAME) and LK_SESSION_OPTIONS in attributes:
+             # Session Start -> AGENT
+             span_kind = "AGENT"
+
+        mapped[SpanAttributes.GEN_AI_SPAN_KIND] = span_kind
+
+    return mapped
+
+
+class BaseMappedSpanExporter(SpanExporter):
+    """Base class for span exporters that map LiveKit attributes to Future AGI conventions."""
+
+    def _convert_attributes(self, attributes):
+        """Convert attributes by mapping them to Future AGI conventions."""
+        if attributes is None:
+            base = {}
+        elif not isinstance(attributes, dict):
+            base = dict(attributes)
+        else:
+            base = attributes
+        try:
+            return _map_attributes_to_fi_conventions(base)
+        except Exception as exc:
+            # The span is still exported, without the Future AGI mapping.
+            _warn_mapping_failed_once(exc)
+            return base
+
+    def export(self, spans) -> SpanExportResult:
+        # The spans handed in are shared with every other processor on the provider (LiveKit
+        # Cloud's exporter among them), and LiveKit redacts by attribute name. The mapping copies
+        # conversation content under names with no "pii" segment (input.value, output.value, the
+        # metadata JSON, gen_ai.conversation.id, user.id), so it must never be written back onto
+        # a span we were handed: it goes on a copy, as LiveKit's own pii.redact() builds one.
+        exported = []
+        for span in spans:
+            try:
+                exported.append(self._mapped_copy(span))
+            except Exception as exc:
+                # The span is still exported, as it is, without the Future AGI mapping.
+                _warn_mapping_failed_once(exc)
+                exported.append(span)
+
+        return super().export(exported)
+
+    def _mapped_copy(self, span):
+        """A copy of `span` carrying the mapped attributes; `span` itself when there is nothing to map."""
+        attributes = span.attributes
+        if not attributes:
+            return span
+        original = dict(attributes)
+        mapped = self._convert_attributes(dict(original))
+        if mapped == original:
+            return span
+        return ReadableSpan(
+            name=span.name,
+            context=span.context,
+            parent=span.parent,
+            resource=span.resource,
+            attributes=mapped,
+            events=span.events,
+            links=span.links,
+            kind=span.kind,
+            status=span.status,
+            start_time=span.start_time,
+            end_time=span.end_time,
+            instrumentation_scope=span.instrumentation_scope,
+        )
