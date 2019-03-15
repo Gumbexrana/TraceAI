@@ -21,3 +21,13 @@ class MappedHTTPSpanExporter(BaseMappedSpanExporter, _FIHTTPSpanExporter):
 
     def __init__(self, *args: Any, **kwargs: Any):
         """Initialize the mapped HTTP exporter."""
+        if _FIHTTPSpanExporter is None:
+            raise ImportError(
+                "fi_instrumentation is not installed. "
+                'Please install the fi_instrumentation with: pip install "fi-instrumentation-otel"'
+            )
+        super().__init__(*args, **kwargs)
+
+    def _convert_attributes(self, attributes):
+        """Override to use the base class mapping."""
+        return super()._convert_attributes(attributes)
