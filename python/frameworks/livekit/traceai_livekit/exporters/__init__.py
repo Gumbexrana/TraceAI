@@ -7,3 +7,8 @@ from .grpc_exporter import MappedGRPCSpanExporter
 from .http_exporter import MappedHTTPSpanExporter
 
 __all__ = [
+    "MappedHTTPSpanExporter",
+    "MappedGRPCSpanExporter",
+    "BaseMappedSpanExporter",
+]
+
