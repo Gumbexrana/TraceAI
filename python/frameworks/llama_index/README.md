@@ -54,3 +54,28 @@ LlamaIndexInstrumentor().instrument(tracer_provider=trace_provider)
 
 ### Create Llama Index Components
 Set up your Llama Index client with built-in observability.
+
+```python
+from llama_index.agent.openai import OpenAIAgent
+from llama_index.core import Settings
+from llama_index.core.tools import FunctionTool
+from llama_index.llms.openai import OpenAI
+
+def multiply(a: int, b: int) -> int:
+    """Multiply two integers and return the result."""
+    return a * b
+
+def add(a: int, b: int) -> int:
+    """Add two integers and return the result."""
+    return a + b
+
+multiply_tool = FunctionTool.from_defaults(fn=multiply)
+add_tool = FunctionTool.from_defaults(fn=add)
+agent = OpenAIAgent.from_tools([multiply_tool, add_tool])
+Settings.llm = OpenAI(model="gpt-3.5-turbo")
+
+if __name__ == "__main__":
+    response = agent.query("What is (121 * 3) + 42?")
+    print(response)
+```
+
