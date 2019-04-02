@@ -38,3 +38,21 @@ trace_provider = register(
 LlamaIndexInstrumentor().instrument(tracer_provider=trace_provider)
 
 
+def multiply(a: int, b: int) -> int:
+    """Multiple two integers and returns the result integer"""
+    return a * b
+
+
+def add(a: int, b: int) -> int:
+    """Add two integers and returns the result integer"""
+    return a + b
+
+
+multiply_tool = FunctionTool.from_defaults(fn=multiply)
+add_tool = FunctionTool.from_defaults(fn=add)
+agent = OpenAIAgent.from_tools([multiply_tool, add_tool])
+Settings.llm = OpenAI(model="gpt-3.5-turbo")
+
+if __name__ == "__main__":
+    response = agent.query("What is (121 * 3) + 42?")
+    print(response)
