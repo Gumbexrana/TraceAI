@@ -46,3 +46,24 @@ trace_provider = register(
 )
 
 # Initialize the Llama Index instrumentor
+LlamaIndexInstrumentor().instrument(tracer_provider=trace_provider)
+
+with tempfile.NamedTemporaryFile() as tf:
+    urlretrieve(
+        "https://raw.githubusercontent.com/run-llama/llama_index/main/docs/docs/examples/data/paul_graham/paul_graham_essay.txt",
+        tf.name,
+    )
+    documents = SimpleDirectoryReader(input_files=[tf.name]).load_data()
+
+llm = OpenAI(model="gpt-3.5-turbo", temperature=0.1)
+pipline = IngestionPipeline(
+    transformations=[
+        SentenceSplitter(chunk_size=1024, chunk_overlap=20),
+        TitleExtractor(llm=llm, metadata_mode=MetadataMode.EMBED, num_workers=8),
+        SummaryExtractor(llm=llm, metadata_mode=MetadataMode.EMBED, num_workers=8),
+        OpenAIEmbedding(),
+    ]
+)
+
+if __name__ == "__main__":
+    nodes = pipline.run(documents=documents)
