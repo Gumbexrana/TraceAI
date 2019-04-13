@@ -56,3 +56,29 @@ if __name__ == "__main__":
 
     chat_msg_1 = generate_openai_multi_modal_chat_message(
         prompt="Describe the images as an alternative text",
+        role="user",
+        image_documents=image_documents,
+    )
+
+    chat_msg_2 = generate_openai_multi_modal_chat_message(
+        prompt="The image is a graph showing the surge in US mortgage rates. It is a visual representation of data, with a title at the top and labels for the x and y-axes. Unfortunately, without seeing the image, I cannot provide specific details about the data or the exact design of the graph.",  # noqa: E501
+        role="assistant",
+    )
+
+    chat_msg_3 = generate_openai_multi_modal_chat_message(
+        prompt="can I know more?",
+        role="user",
+    )
+    response_gen = openai_mm_llm.stream_chat(
+        # prompt="Describe the images as an alternative text",
+        messages=[
+            chat_msg_1,
+            chat_msg_2,
+            chat_msg_3,
+        ],
+        stream_options={
+            "include_usage": True,
+        },
+    )
+    for response in response_gen:
+        print(response.delta, end="")
