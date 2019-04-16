@@ -30,3 +30,18 @@ trace_provider = register(
     project_type=ProjectType.EXPERIMENT,
     eval_tags=eval_tags,
     project_name="FUTURE_AGI",
+    project_version_name="v1",
+)
+
+# Initialize the Llama Index instrumentor
+LlamaIndexInstrumentor().instrument(tracer_provider=trace_provider)
+
+llm = OpenAI(model="gpt-3.5-turbo")
+
+if __name__ == "__main__":
+    response_gen = llm.stream_chat(
+        [ChatMessage(content="hello")],
+        stream_options={"include_usage": True},
+    )
+    for response in response_gen:
+        print(response.delta, end="")
