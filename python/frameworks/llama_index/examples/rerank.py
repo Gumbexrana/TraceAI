@@ -48,3 +48,25 @@ def main():
     print("\nExample 1: Using Cohere Rerank")
     api_key = os.environ["COHERE_API_KEY"]
     cohere_rerank = CohereRerank(api_key=api_key, top_n=2)
+    query_engine_rerank = index.as_query_engine(
+        similarity_top_k=10,
+        node_postprocessors=[cohere_rerank],
+    )
+    response_rerank = query_engine_rerank.query(
+        "What did Sam Altman do in this essay?",
+    )
+    pprint_response(response_rerank, show_source=True)
+
+    # Example 2: Without Cohere Rerank
+    print("\nExample 2: Direct Retrieval without Rerank")
+    query_engine_direct = index.as_query_engine(
+        similarity_top_k=2,
+    )
+    response_direct = query_engine_direct.query(
+        "What did Sam Altman do in this essay?",
+    )
+    pprint_response(response_direct, show_source=True)
+
+
+if __name__ == "__main__":
+    main()
