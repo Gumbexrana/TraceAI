@@ -165,3 +165,75 @@ def finalize_fn(
 class OutputAgentComponent(CustomAgentComponent):
     """Output agent component."""
 
+    tool_runner_component: ToolRunnerComponent
+    output_parser: ReActOutputParser
+
+    def __init__(self, tools, **kwargs):
+        tool_runner_component = ToolRunnerComponent(tools)
+        super().__init__(
+            tool_runner_component=tool_runner_component,
+            output_parser=ReActOutputParser(),
+            **kwargs,
+        )
+
+    def _run_component(self, **kwargs: Any) -> Any:
+        """Run component."""
+        chat_response = kwargs["chat_response"]
+        task = kwargs["task"]
+        state = kwargs["state"]
+        reasoning_step = self.output_parser.parse(chat_response.message.content)
+        if reasoning_step.is_done:
+            return {"output": finalize_fn(task, state, reasoning_step, is_done=True)}
+        else:
+            tool_output = self.tool_runner_component.run_component(
+                tool_name=reasoning_step.action,
+                tool_input=reasoning_step.action_input,
+            )
+            return {
+                "output": finalize_fn(
+                    task,
+                    state,
+                    reasoning_step,
+                    is_done=False,
+                    tool_output=tool_output,
+                )
+            }
+
+    @property
+    def _input_keys(self) -> Set[str]:
+        return {"chat_response"}
+
+    @property
+    def _optional_input_keys(self) -> Set[str]:
+        return {"is_done", "tool_output"}
+
+    @property
+    def _output_keys(self) -> Set[str]:
+        return {"output"}
+
+    @property
+    def sub_query_components(self) -> List[QueryComponent]:
+        return [self.tool_runner_component]
+
+
+react_output_component = OutputAgentComponent([sql_tool])
+
+qp = QueryPipeline(
+    modules={
+        "agent_input": agent_input_component,
+        "react_prompt": react_prompt_component,
+        "llm": OpenAI(model="gpt-4o"),
+        "react_output": react_output_component,
+    },
+    verbose=True,
+)
+qp.add_chain(["agent_input", "react_prompt", "llm", "react_output"])
+
+agent_worker = QueryPipelineAgentWorker(qp)
+agent = AgentRunner(agent_worker)
+
+if __name__ == "__main__":
+    response = agent.chat(
+        "What was the year that The Notorious B.I.G was signed to Bad Boy?"
+    )
+    print(str(response))
