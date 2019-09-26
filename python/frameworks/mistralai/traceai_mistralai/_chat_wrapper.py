@@ -165,3 +165,254 @@ class _WithMistralAI(ABC):
         response: Any,
         with_span: _WithSpan,
         request_parameters: Mapping[str, Any],
+    ) -> Any:
+        from mistralai.models.chatcompletionresponse import ChatCompletionResponse
+        from mistralai.models.completionevent import CompletionEvent
+
+        if not isinstance(response, ChatCompletionResponse):  # assume it's a stream
+            response_attributes_extractor = _StreamResponseAttributesExtractor()
+            response_accumulator = _ChatCompletionAccumulator(
+                request_parameters=request_parameters,
+                response_attributes_extractor=response_attributes_extractor,
+                chat_completion_type=CompletionEvent,
+            )
+
+            if isinstance(response, EventStreamAsync):
+                return _AsyncStream(
+                    stream=response,
+                    with_span=with_span,
+                    response_accumulator=response_accumulator,
+                )
+            elif isinstance(response, EventStream):
+                return _Stream(
+                    stream=response,
+                    with_span=with_span,
+                    response_accumulator=response_accumulator,
+                )
+            elif isinstance(response, Iterator):
+                return _Stream(
+                    stream=response,
+                    with_span=with_span,
+                    response_accumulator=response_accumulator,
+                )
+            else:
+                raise TypeError("Response must be an asynchronous iterator")
+        _finish_tracing(
+            status=trace_api.Status(status_code=trace_api.StatusCode.OK),
+            with_span=with_span,
+            has_attributes=_ResponseAttributes(
+                request_parameters=request_parameters,
+                response=response,
+                response_attributes_extractor=self._response_attributes_extractor,
+            ),
+        )
+        return response
+
+
+class _SyncChatWrapper(_WithTracer, _WithMistralAI):
+    def __init__(self, span_name: str, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._span_name = span_name
+
+    def __call__(
+        self,
+        wrapped: Callable[..., Any],
+        instance: "Mistral",
+        args: Tuple[Any],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+            return wrapped(*args, **kwargs)
+        try:
+            request_parameters = self._parse_args(
+                signature(wrapped), instance, *args, **kwargs
+            )
+        except Exception:
+            logger.exception("Failed to parse request args")
+            return wrapped(*args, **kwargs)
+        with self._start_as_current_span(
+            span_name=self._span_name,
+            attributes=self._get_attributes_from_request(request_parameters),
+            context_attributes=get_attributes_from_context(),
+            extra_attributes=self._get_extra_attributes_from_request(
+                request_parameters
+            ),
+        ) as with_span:
+            try:
+                response = wrapped(*args, **kwargs)
+            except Exception as exception:
+                with_span.record_exception(exception)
+                status = trace_api.Status(
+                    status_code=trace_api.StatusCode.ERROR,
+                    # Follow the format in OTEL SDK for description, see:
+                    # https://github.com/open-telemetry/opentelemetry-python/blob/2b9dcfc5d853d1c10176937a6bcaade54cda1a31/opentelemetry-api/src/opentelemetry/trace/__init__.py#L588  # noqa E501
+                    description=f"{type(exception).__name__}: {exception}",
+                )
+                with_span.finish_tracing(status=status)
+                raise
+            try:
+                response = self._finalize_response(
+                    response=response,
+                    with_span=with_span,
+                    request_parameters=request_parameters,
+                )
+            except Exception:
+                logger.exception(
+                    f"Failed to finish tracing for response of type {type(response)}"
+                )
+                with_span.finish_tracing()
+        return response
+
+
+class _AsyncChatWrapper(_WithTracer, _WithMistralAI):
+    def __init__(self, span_name: str, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._span_name = span_name
+
+    async def __call__(
+        self,
+        wrapped: Callable[..., Any],
+        instance: "Mistral",
+        args: Tuple[Any],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+            return await wrapped(*args, **kwargs)
+        try:
+            request_parameters = self._parse_args(
+                signature(wrapped), instance, *args, **kwargs
+            )
+        except Exception:
+            logger.exception("Failed to parse request args")
+            return await wrapped(*args, **kwargs)
+        with self._start_as_current_span(
+            span_name=self._span_name,
+            attributes=self._get_attributes_from_request(request_parameters),
+            context_attributes=get_attributes_from_context(),
+            extra_attributes=self._get_extra_attributes_from_request(
+                request_parameters
+            ),
+        ) as with_span:
+            try:
+                response = await wrapped(*args, **kwargs)
+            except Exception as exception:
+                with_span.record_exception(exception)
+                status = trace_api.Status(
+                    status_code=trace_api.StatusCode.ERROR,
+                    # Follow the format in OTEL SDK for description, see:
+                    # https://github.com/open-telemetry/opentelemetry-python/blob/2b9dcfc5d853d1c10176937a6bcaade54cda1a31/opentelemetry-api/src/opentelemetry/trace/__init__.py#L588  # noqa E501
+                    description=f"{type(exception).__name__}: {exception}",
+                )
+                with_span.finish_tracing(status=status)
+                raise
+            try:
+                response = self._finalize_response(
+                    response=response,
+                    with_span=with_span,
+                    request_parameters=request_parameters,
+                )
+            except Exception:
+                logger.exception(
+                    f"Failed to finish tracing for response of type {type(response)}"
+                )
+                with_span.finish_tracing()
+        return response
+
+
+class _AsyncStreamChatWrapper(_WithTracer, _WithMistralAI):
+    def __init__(self, span_name: str, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._span_name = span_name
+
+    async def __call__(
+        self,
+        wrapped: Callable[..., Any],
+        instance: "Mistral",
+        args: Tuple[Any],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+            return await wrapped(*args, **kwargs)
+        try:
+            request_parameters = self._parse_args(
+                signature(wrapped), instance, *args, **kwargs
+            )
+        except Exception:
+            logger.exception("Failed to parse request args")
+            return await wrapped(*args, **kwargs)
+        with self._start_as_current_span(
+            span_name=self._span_name,
+            attributes=self._get_attributes_from_request(request_parameters),
+            context_attributes=get_attributes_from_context(),
+            extra_attributes=self._get_extra_attributes_from_request(
+                request_parameters
+            ),
+        ) as with_span:
+            try:
+                response = await wrapped(*args, **kwargs)
+            except Exception as exception:
+                with_span.record_exception(exception)
+                status = trace_api.Status(
+                    status_code=trace_api.StatusCode.ERROR,
+                    description=f"{type(exception).__name__}: {exception}",
+                )
+                with_span.finish_tracing(status=status)
+                raise
+            try:
+                response = self._finalize_response(
+                    response=response,
+                    with_span=with_span,
+                    request_parameters=request_parameters,
+                )
+            except Exception:
+                logger.exception(
+                    f"Failed to finish tracing for response of type {type(response)}"
+                )
+                with_span.finish_tracing()
+        return response
+
+
+class _ResponseAttributes:
+    __slots__ = (
+        "_response",
+        "_request_parameters",
+        "_response_attributes_extractor",
+    )
+
+    def __init__(
+        self,
+        response: Any,
+        request_parameters: Mapping[str, Any],
+        response_attributes_extractor: _ResponseAttributesExtractor,
+    ) -> None:
+        self._response = response
+        self._request_parameters = request_parameters
+        self._response_attributes_extractor = response_attributes_extractor
+
+    def get_attributes(self) -> Iterator[Tuple[str, AttributeValue]]:
+        if hasattr(self._response, "model_dump_json") and callable(
+            self._response.model_dump_json
+        ):
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    value = self._response.model_dump_json(exclude_unset=True)
+                assert isinstance(value, str)
+                output_value = (
+                    json.loads(value)
+                    .get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                )
+
+                yield SpanAttributes.OUTPUT_VALUE, value
+                yield SpanAttributes.OUTPUT_VALUE, output_value
+                yield SpanAttributes.OUTPUT_MIME_TYPE, FiMimeTypeValues.JSON.value
+            except Exception:
+                logger.exception("Failed to get model dump json")
+
+    def get_extra_attributes(self) -> Iterator[Tuple[str, AttributeValue]]:
+        yield from self._response_attributes_extractor.get_attributes_from_response(
+            response=self._response,
+            request_parameters=self._request_parameters,
+        )
