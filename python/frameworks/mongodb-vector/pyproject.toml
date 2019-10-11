@@ -1,0 +1,8 @@
+[tool.poetry]
+name = "traceAI-mongodb"
+version = "0.1.0"
+description = "OpenTelemetry instrumentation for MongoDB Atlas Vector Search"
+authors = ["Future AGI <no-reply@futureagi.com>"]
+readme = "README.md"
+packages = [{ include = "traceai_mongodb" }]
+keywords = ["opentelemetry", "mongodb", "atlas", "vector-search", "tracing", "observability", "rag"]
