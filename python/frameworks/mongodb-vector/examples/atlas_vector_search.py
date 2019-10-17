@@ -86,3 +86,137 @@ def vector_search(query: str, limit: int = 5, num_candidates: int = 100) -> list
             }
         },
         {
+            "$project": {
+                "text": 1,
+                "category": 1,
+                "score": {"$meta": "vectorSearchScore"},
+            }
+        }
+    ]
+
+    results = list(collection.aggregate(pipeline))
+
+    return [
+        {
+            "id": str(r["_id"]),
+            "text": r["text"],
+            "category": r["category"],
+            "score": r.get("score", 0),
+        }
+        for r in results
+    ]
+
+
+def vector_search_with_filter(
+    query: str,
+    category: str,
+    limit: int = 5
+) -> list[dict]:
+    """Vector search with pre-filter."""
+    query_vector = generate_fake_embedding(query)
+
+    # Vector search with filter (traced)
+    pipeline = [
+        {
+            "$vectorSearch": {
+                "index": "vector_index",
+                "path": "embedding",
+                "queryVector": query_vector,
+                "numCandidates": 100,
+                "limit": limit,
+                "filter": {"category": category},
+            }
+        },
+        {
+            "$project": {
+                "text": 1,
+                "category": 1,
+                "score": {"$meta": "vectorSearchScore"},
+            }
+        }
+    ]
+
+    results = list(collection.aggregate(pipeline))
+
+    return [
+        {
+            "id": str(r["_id"]),
+            "text": r["text"],
+            "score": r.get("score", 0),
+        }
+        for r in results
+    ]
+
+
+def find_documents(filter_query: dict = None, limit: int = 10) -> list[dict]:
+    """Find documents using standard MongoDB query."""
+    # Find (traced)
+    cursor = collection.find(filter_query or {}).limit(limit)
+
+    return [
+        {
+            "id": str(doc["_id"]),
+            "text": doc["text"],
+            "category": doc.get("category", ""),
+        }
+        for doc in cursor
+    ]
+
+
+def update_document(doc_id: str, updates: dict):
+    """Update a document."""
+    from bson import ObjectId
+
+    # Update one (traced)
+    result = collection.update_one(
+        {"_id": ObjectId(doc_id)},
+        {"$set": updates}
+    )
+    print(f"Modified {result.modified_count} document(s)")
+
+
+def delete_by_category(category: str):
+    """Delete documents by category."""
+    # Delete many (traced)
+    result = collection.delete_many({"category": category})
+    print(f"Deleted {result.deleted_count} documents")
+
+
+if __name__ == "__main__":
+    # Clear existing data
+    collection.delete_many({})
+
+    # Example documents
+    docs = [
+        {"text": "Machine learning enables pattern recognition.", "category": "ml"},
+        {"text": "Deep learning uses multi-layer neural networks.", "category": "dl"},
+        {"text": "MongoDB is a document database.", "category": "db"},
+        {"text": "Vector search finds semantically similar documents.", "category": "db"},
+        {"text": "Natural language processing analyzes text.", "category": "nlp"},
+    ]
+
+    # Add documents
+    add_documents(docs)
+
+    # Standard find
+    print(f"\nAll documents:")
+    all_docs = find_documents(limit=5)
+    for d in all_docs:
+        print(f"  - [{d['category']}] {d['text'][:40]}...")
+
+    # Vector search (requires Atlas with vector index)
+    # Uncomment if you have Atlas with vector search configured:
+    #
+    # query = "neural networks and AI"
+    # print(f"\nVector search for: '{query}'")
+    # results = vector_search(query, limit=3)
+    # for r in results:
+    #     print(f"  - [{r['category']}] {r['text'][:40]}... (score: {r['score']:.4f})")
+    #
+    # print(f"\nFiltered vector search (category='ml'):")
+    # filtered = vector_search_with_filter(query, category="ml", limit=2)
+    # for r in filtered:
+    #     print(f"  - {r['text'][:50]}...")
+
+    print("\nNote: Vector search requires MongoDB Atlas with a vector search index.")
+    print("See: https://www.mongodb.com/docs/atlas/atlas-vector-search/")
