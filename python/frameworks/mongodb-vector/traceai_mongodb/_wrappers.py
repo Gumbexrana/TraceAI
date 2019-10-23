@@ -98,3 +98,155 @@ class InsertOneWrapper(BaseWrapper):
     def __call__(self, wrapped: Callable, instance: Any, args: tuple, kwargs: dict) -> Any:
         collection_name = self._get_collection_name(instance)
         database = self._get_database_name(instance)
+
+        attributes = self._get_attributes("insert_one", collection_name, database)
+        attributes["db.vector.upsert.count"] = 1
+
+        with self._tracer.start_as_current_span("mongodb insert_one", kind=SpanKind.CLIENT, attributes=attributes) as span:
+            try:
+                result = wrapped(*args, **kwargs)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+
+class InsertManyWrapper(BaseWrapper):
+    def __call__(self, wrapped: Callable, instance: Any, args: tuple, kwargs: dict) -> Any:
+        collection_name = self._get_collection_name(instance)
+        database = self._get_database_name(instance)
+        documents = args[0] if args else kwargs.get("documents", [])
+
+        attributes = self._get_attributes("insert_many", collection_name, database)
+        attributes["db.vector.upsert.count"] = len(documents) if documents else 0
+
+        with self._tracer.start_as_current_span("mongodb insert_many", kind=SpanKind.CLIENT, attributes=attributes) as span:
+            try:
+                result = wrapped(*args, **kwargs)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+
+class UpdateOneWrapper(BaseWrapper):
+    def __call__(self, wrapped: Callable, instance: Any, args: tuple, kwargs: dict) -> Any:
+        collection_name = self._get_collection_name(instance)
+        database = self._get_database_name(instance)
+
+        attributes = self._get_attributes("update_one", collection_name, database)
+
+        with self._tracer.start_as_current_span("mongodb update_one", kind=SpanKind.CLIENT, attributes=attributes) as span:
+            try:
+                result = wrapped(*args, **kwargs)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+
+class UpdateManyWrapper(BaseWrapper):
+    def __call__(self, wrapped: Callable, instance: Any, args: tuple, kwargs: dict) -> Any:
+        collection_name = self._get_collection_name(instance)
+        database = self._get_database_name(instance)
+
+        attributes = self._get_attributes("update_many", collection_name, database)
+
+        with self._tracer.start_as_current_span("mongodb update_many", kind=SpanKind.CLIENT, attributes=attributes) as span:
+            try:
+                result = wrapped(*args, **kwargs)
+                if result:
+                    span.set_attribute("db.vector.update.matched_count", result.matched_count)
+                    span.set_attribute("db.vector.update.modified_count", result.modified_count)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+
+class DeleteOneWrapper(BaseWrapper):
+    def __call__(self, wrapped: Callable, instance: Any, args: tuple, kwargs: dict) -> Any:
+        collection_name = self._get_collection_name(instance)
+        database = self._get_database_name(instance)
+
+        attributes = self._get_attributes("delete_one", collection_name, database)
+        attributes["db.vector.delete.count"] = 1
+
+        with self._tracer.start_as_current_span("mongodb delete_one", kind=SpanKind.CLIENT, attributes=attributes) as span:
+            try:
+                result = wrapped(*args, **kwargs)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+
+class DeleteManyWrapper(BaseWrapper):
+    def __call__(self, wrapped: Callable, instance: Any, args: tuple, kwargs: dict) -> Any:
+        collection_name = self._get_collection_name(instance)
+        database = self._get_database_name(instance)
+
+        attributes = self._get_attributes("delete_many", collection_name, database)
+
+        with self._tracer.start_as_current_span("mongodb delete_many", kind=SpanKind.CLIENT, attributes=attributes) as span:
+            try:
+                result = wrapped(*args, **kwargs)
+                if result:
+                    span.set_attribute("db.vector.delete.count", result.deleted_count)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+
+class FindWrapper(BaseWrapper):
+    def __call__(self, wrapped: Callable, instance: Any, args: tuple, kwargs: dict) -> Any:
+        collection_name = self._get_collection_name(instance)
+        database = self._get_database_name(instance)
+        limit = kwargs.get("limit", 0)
+
+        attributes = self._get_attributes("find", collection_name, database)
+        if limit:
+            attributes["db.vector.query.top_k"] = limit
+
+        with self._tracer.start_as_current_span("mongodb find", kind=SpanKind.CLIENT, attributes=attributes) as span:
+            try:
+                result = wrapped(*args, **kwargs)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+
+class FindOneWrapper(BaseWrapper):
+    def __call__(self, wrapped: Callable, instance: Any, args: tuple, kwargs: dict) -> Any:
+        collection_name = self._get_collection_name(instance)
+        database = self._get_database_name(instance)
+
+        attributes = self._get_attributes("find_one", collection_name, database)
+        attributes["db.vector.query.top_k"] = 1
+
+        with self._tracer.start_as_current_span("mongodb find_one", kind=SpanKind.CLIENT, attributes=attributes) as span:
+            try:
+                result = wrapped(*args, **kwargs)
+                span.set_attribute("db.vector.results.count", 1 if result else 0)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
