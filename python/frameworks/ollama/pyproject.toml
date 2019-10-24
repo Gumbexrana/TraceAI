@@ -1,0 +1,7 @@
+[tool.poetry]
+name = "traceAI-ollama"
+version = "0.1.0"
+description = "OpenTelemetry instrumentation for Ollama - local LLM runner"
+authors = ["Future AGI <no-reply@futureagi.com>"]
+readme = "README.md"
+packages = [
