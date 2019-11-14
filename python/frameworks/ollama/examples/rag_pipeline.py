@@ -32,3 +32,55 @@ def main():
         "Natural language processing enables computers to understand human language.",
         "Deep learning uses neural networks with many layers.",
     ]
+
+    # Embed all documents
+    print("=== Embedding Documents ===")
+    doc_embeddings = []
+    for doc in documents:
+        response = ollama.embed(model="nomic-embed-text", input=doc)
+        doc_embeddings.append(response["embeddings"][0])
+        print(f"Embedded: {doc[:50]}...")
+
+    # User query
+    query = "What is machine learning?"
+    print(f"\n=== Query: {query} ===")
+
+    # Embed query
+    query_response = ollama.embed(model="nomic-embed-text", input=query)
+    query_embedding = query_response["embeddings"][0]
+
+    # Find most relevant documents
+    similarities = [
+        (i, cosine_similarity(query_embedding, doc_emb))
+        for i, doc_emb in enumerate(doc_embeddings)
+    ]
+    similarities.sort(key=lambda x: x[1], reverse=True)
+
+    print("\n=== Top Relevant Documents ===")
+    top_docs = []
+    for idx, score in similarities[:3]:
+        print(f"Score: {score:.4f} - {documents[idx]}")
+        top_docs.append(documents[idx])
+
+    # Generate response with context
+    print("\n=== Generating Response ===")
+    context = "\n".join(top_docs)
+    response = ollama.chat(
+        model="llama3.2",
+        messages=[
+            {
+                "role": "system",
+                "content": f"Answer the question based on this context:\n{context}",
+            },
+            {"role": "user", "content": query},
+        ],
+    )
+    print(f"Answer: {response['message']['content']}")
+
+    # Show token usage
+    print(f"\nTokens - Prompt: {response.get('prompt_eval_count', 'N/A')}")
+    print(f"Tokens - Completion: {response.get('eval_count', 'N/A')}")
+
+
+if __name__ == "__main__":
+    main()
