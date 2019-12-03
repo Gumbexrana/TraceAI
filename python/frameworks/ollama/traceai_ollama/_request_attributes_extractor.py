@@ -77,3 +77,38 @@ class _RequestAttributesExtractor:
     def _extract_messages(
         self, messages: List[Dict[str, Any]]
     ) -> Iterator[Tuple[str, AttributeValue]]:
+        """Extract message attributes."""
+        for i, message in enumerate(messages):
+            role = message.get("role", "")
+            content = message.get("content", "")
+
+            yield f"{SpanAttributes.GEN_AI_INPUT_MESSAGES}.{i}.{MessageAttributes.MESSAGE_ROLE}", role
+            yield f"{SpanAttributes.GEN_AI_INPUT_MESSAGES}.{i}.{MessageAttributes.MESSAGE_CONTENT}", content
+
+            # Handle images in multimodal messages
+            if "images" in message:
+                images = message.get("images", [])
+                yield f"{SpanAttributes.GEN_AI_INPUT_MESSAGES}.{i}.images", safe_json_dumps(images[:3])  # Limit to 3
+
+    def _extract_invocation_parameters(
+        self, request_parameters: Mapping[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract model invocation parameters."""
+        params = {}
+
+        # Common parameters
+        param_keys = [
+            "temperature", "top_p", "top_k", "num_predict", "num_ctx",
+            "stop", "repeat_penalty", "presence_penalty", "frequency_penalty",
+            "seed", "num_gpu", "num_thread", "format"
+        ]
+
+        for key in param_keys:
+            if key in request_parameters:
+                params[key] = request_parameters[key]
+
+        # Options dict (Ollama-specific)
+        if "options" in request_parameters:
+            params["options"] = request_parameters["options"]
+
+        return params
