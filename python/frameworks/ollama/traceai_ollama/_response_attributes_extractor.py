@@ -64,3 +64,32 @@ class _ResponseAttributesExtractor:
         elif "embedding" in response:
             embedding = response["embedding"]
             yield f"{SpanAttributes.EMBEDDING_EMBEDDINGS}.0.{EmbeddingAttributes.EMBEDDING_VECTOR}", safe_json_dumps(embedding[:10])  # First 10 dims
+            yield SpanAttributes.OUTPUT_VALUE, f"[{len(embedding)} dimensions]"
+
+        # Multiple embeddings
+        elif "embeddings" in response:
+            embeddings = response["embeddings"]
+            for i, emb in enumerate(embeddings[:5]):  # Limit to 5
+                yield f"{SpanAttributes.EMBEDDING_EMBEDDINGS}.{i}.{EmbeddingAttributes.EMBEDDING_VECTOR}", safe_json_dumps(emb[:10])
+            yield SpanAttributes.OUTPUT_VALUE, f"[{len(embeddings)} embeddings]"
+
+        # Raw response for reference
+        yield SpanAttributes.OUTPUT_VALUE, safe_json_dumps(response)
+
+        # Performance metrics (Ollama-specific)
+        if "total_duration" in response:
+            yield "ollama.total_duration_ns", response["total_duration"]
+        if "load_duration" in response:
+            yield "ollama.load_duration_ns", response["load_duration"]
+        if "prompt_eval_duration" in response:
+            yield "ollama.prompt_eval_duration_ns", response["prompt_eval_duration"]
+        if "eval_duration" in response:
+            yield "ollama.eval_duration_ns", response["eval_duration"]
+
+        # Model info
+        if "model" in response:
+            yield SpanAttributes.GEN_AI_REQUEST_MODEL, response["model"]
+
+        # Done reason
+        if "done_reason" in response:
+            yield "ollama.done_reason", response["done_reason"]
