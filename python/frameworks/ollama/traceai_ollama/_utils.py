@@ -49,3 +49,26 @@ def _flatten(
 
 def _finish_tracing(
     status: trace_api.Status,
+    with_span: _WithSpan,
+    attributes: Optional[Iterator[Tuple[str, AttributeValue]]] = None,
+    extra_attributes: Optional[Iterator[Tuple[str, AttributeValue]]] = None,
+) -> None:
+    """Finish tracing with status and attributes."""
+    if attributes:
+        for key, value in attributes:
+            if value is not None:
+                with_span._span.set_attribute(key, value)
+    if extra_attributes:
+        for key, value in extra_attributes:
+            if value is not None:
+                with_span._span.set_attribute(key, value)
+    with_span.finish_tracing(status=status)
+
+
+def _get_output_value(response: Dict[str, Any]) -> str:
+    """Extract output value from response."""
+    if "message" in response:
+        return response["message"].get("content", "")
+    if "response" in response:
+        return response.get("response", "")
+    return ""
