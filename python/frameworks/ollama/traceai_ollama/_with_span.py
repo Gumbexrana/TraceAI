@@ -27,3 +27,16 @@ class _WithSpan:
         self,
         status: Optional[trace_api.Status] = None,
     ) -> None:
+        """Finish the span with optional status."""
+        if self._span.is_recording():
+            if status is not None:
+                self._span.set_status(status)
+            # Set context attributes
+            for key, value in self._context_attributes.items():
+                if value is not None:
+                    self._span.set_attribute(key, value)
+            # Set extra attributes
+            for key, value in self._extra_attributes.items():
+                if value is not None:
+                    self._span.set_attribute(key, value)
+            self._span.end()
