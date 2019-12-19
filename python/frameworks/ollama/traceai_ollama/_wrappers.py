@@ -476,3 +476,209 @@ class _AsyncGenerateWrapper(_WithTracer):
                 response = await wrapped(*args, **kwargs)
             except Exception as exception:
                 span.record_exception(exception)
+                status = trace_api.Status(
+                    status_code=trace_api.StatusCode.ERROR,
+                    description=f"{type(exception).__name__}: {exception}",
+                )
+                span.finish_tracing(status=status)
+                raise
+
+            if streaming and hasattr(response, "__aiter__"):
+                return self._handle_async_streaming_response(span, response, request_parameters)
+            else:
+                return self._handle_response(span, response, request_parameters)
+
+    def _handle_response(
+        self, span: _WithSpan, response: Any, request_parameters: Dict[str, Any]
+    ) -> Any:
+        """Handle non-streaming response."""
+        try:
+            response_dict = _to_dict(response)
+            _finish_tracing(
+                status=trace_api.Status(status_code=trace_api.StatusCode.OK),
+                with_span=span,
+                attributes=self._response_extractor.get_attributes(response_dict),
+                extra_attributes=self._response_extractor.get_extra_attributes(
+                    response_dict, request_parameters
+                ),
+            )
+        except Exception:
+            logger.exception("Failed to finalize response")
+            span.finish_tracing()
+        return response
+
+    async def _handle_async_streaming_response(
+        self, span: _WithSpan, response: Any, request_parameters: Dict[str, Any]
+    ):
+        """Handle async streaming response."""
+        content_parts: List[str] = []
+        raw_chunks: List[Dict[str, Any]] = []
+        final_response: Dict[str, Any] = {}
+
+        async def streaming_wrapper():
+            nonlocal final_response
+            try:
+                async for chunk in response:
+                    chunk_dict = _to_dict(chunk)
+                    raw_chunks.append(chunk_dict)
+
+                    if "response" in chunk_dict:
+                        content = chunk_dict.get("response", "")
+                        if content:
+                            content_parts.append(content)
+
+                    if chunk_dict.get("done", False):
+                        final_response = chunk_dict
+
+                    yield chunk
+
+            except Exception as exception:
+                span.record_exception(exception)
+                status = trace_api.Status(
+                    status_code=trace_api.StatusCode.ERROR,
+                    description=f"{type(exception).__name__}: {exception}",
+                )
+                span.finish_tracing(status=status)
+                raise
+            else:
+                try:
+                    final_response["response"] = "".join(content_parts)
+                    span._span.set_attribute(SpanAttributes.OUTPUT_VALUE, safe_json_dumps(raw_chunks))
+                    span._span.set_attribute(SpanAttributes.OUTPUT_VALUE, "".join(content_parts))
+
+                    _finish_tracing(
+                        status=trace_api.Status(status_code=trace_api.StatusCode.OK),
+                        with_span=span,
+                        attributes=self._response_extractor.get_attributes(final_response, is_streaming=True),
+                        extra_attributes=self._response_extractor.get_extra_attributes(
+                            final_response, request_parameters, is_streaming=True
+                        ),
+                    )
+                except Exception:
+                    logger.exception("Failed to finalize streaming response")
+                    span.finish_tracing()
+            finally:
+                if span._span.is_recording():
+                    span.finish_tracing()
+
+        return streaming_wrapper()
+
+
+class _EmbedWrapper(_WithTracer):
+    """Wrapper for Ollama embeddings."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._request_extractor = _RequestAttributesExtractor()
+        self._response_extractor = _ResponseAttributesExtractor()
+
+    def __call__(
+        self,
+        wrapped: Callable[..., Any],
+        instance: Any,
+        args: Tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if context_api.get_value(context_api._SUPPRESS_INSTRUMENTATION_KEY):
+            return wrapped(*args, **kwargs)
+
+        request_parameters = dict(kwargs)
+        request_parameters["_endpoint"] = "embed"
+        if args:
+            request_parameters["model"] = args[0] if len(args) > 0 else kwargs.get("model")
+            if len(args) > 1:
+                request_parameters["input"] = args[1]
+
+        span_name = f"ollama.embed"
+
+        with self._start_as_current_span(
+            span_name=span_name,
+            attributes=self._request_extractor.get_attributes_from_request(request_parameters),
+            context_attributes=get_attributes_from_context(),
+            extra_attributes=self._request_extractor.get_extra_attributes_from_request(request_parameters),
+        ) as span:
+            try:
+                response = wrapped(*args, **kwargs)
+            except Exception as exception:
+                span.record_exception(exception)
+                status = trace_api.Status(
+                    status_code=trace_api.StatusCode.ERROR,
+                    description=f"{type(exception).__name__}: {exception}",
+                )
+                span.finish_tracing(status=status)
+                raise
+
+            try:
+                response_dict = _to_dict(response)
+                _finish_tracing(
+                    status=trace_api.Status(status_code=trace_api.StatusCode.OK),
+                    with_span=span,
+                    attributes=self._response_extractor.get_attributes(response_dict),
+                    extra_attributes=self._response_extractor.get_extra_attributes(
+                        response_dict, request_parameters
+                    ),
+                )
+            except Exception:
+                logger.exception("Failed to finalize response")
+                span.finish_tracing()
+            return response
+
+
+class _AsyncEmbedWrapper(_WithTracer):
+    """Async wrapper for Ollama embeddings."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._request_extractor = _RequestAttributesExtractor()
+        self._response_extractor = _ResponseAttributesExtractor()
+
+    async def __call__(
+        self,
+        wrapped: Callable[..., Any],
+        instance: Any,
+        args: Tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if context_api.get_value(context_api._SUPPRESS_INSTRUMENTATION_KEY):
+            return await wrapped(*args, **kwargs)
+
+        request_parameters = dict(kwargs)
+        request_parameters["_endpoint"] = "embed"
+        if args:
+            request_parameters["model"] = args[0] if len(args) > 0 else kwargs.get("model")
+            if len(args) > 1:
+                request_parameters["input"] = args[1]
+
+        span_name = f"ollama.embed"
+
+        with self._start_as_current_span(
+            span_name=span_name,
+            attributes=self._request_extractor.get_attributes_from_request(request_parameters),
+            context_attributes=get_attributes_from_context(),
+            extra_attributes=self._request_extractor.get_extra_attributes_from_request(request_parameters),
+        ) as span:
+            try:
+                response = await wrapped(*args, **kwargs)
+            except Exception as exception:
+                span.record_exception(exception)
+                status = trace_api.Status(
+                    status_code=trace_api.StatusCode.ERROR,
+                    description=f"{type(exception).__name__}: {exception}",
+                )
+                span.finish_tracing(status=status)
+                raise
+
+            try:
+                response_dict = _to_dict(response)
+                _finish_tracing(
+                    status=trace_api.Status(status_code=trace_api.StatusCode.OK),
+                    with_span=span,
+                    attributes=self._response_extractor.get_attributes(response_dict),
+                    extra_attributes=self._response_extractor.get_extra_attributes(
+                        response_dict, request_parameters
+                    ),
+                )
+            except Exception:
+                logger.exception("Failed to finalize response")
+                span.finish_tracing()
+            return response
