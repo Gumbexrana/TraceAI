@@ -130,3 +130,60 @@ class OllamaInstrumentor(BaseInstrumentor):
 
         # Wrap module-level functions
         if hasattr(ollama_module, "chat"):
+            wrap_function_wrapper(
+                module="ollama",
+                name="chat",
+                wrapper=_ChatWrapper(tracer=self._tracer),
+            )
+
+        if hasattr(ollama_module, "generate"):
+            wrap_function_wrapper(
+                module="ollama",
+                name="generate",
+                wrapper=_GenerateWrapper(tracer=self._tracer),
+            )
+
+        if hasattr(ollama_module, "embed"):
+            wrap_function_wrapper(
+                module="ollama",
+                name="embed",
+                wrapper=_EmbedWrapper(tracer=self._tracer),
+            )
+
+        if hasattr(ollama_module, "embeddings"):
+            wrap_function_wrapper(
+                module="ollama",
+                name="embeddings",
+                wrapper=_EmbedWrapper(tracer=self._tracer),
+            )
+
+        # Wrap Protect if available
+        if Protect is not None:
+            self._original_protect = Protect.protect
+            wrap_function_wrapper(
+                module="fi.evals",
+                name="Protect.protect",
+                wrapper=GuardrailProtectWrapper(tracer=self._tracer),
+            )
+        else:
+            self._original_protect = None
+
+    def _uninstrument(self, **kwargs: Any) -> None:
+        ollama_module = import_module("ollama")
+
+        if hasattr(self, "_original_chat"):
+            ollama_module.Client.chat = self._original_chat
+        if hasattr(self, "_original_generate"):
+            ollama_module.Client.generate = self._original_generate
+        if hasattr(self, "_original_embed"):
+            ollama_module.Client.embed = self._original_embed
+        if hasattr(self, "_original_embeddings"):
+            ollama_module.Client.embeddings = self._original_embeddings
+        if hasattr(self, "_original_async_chat"):
+            ollama_module.AsyncClient.chat = self._original_async_chat
+        if hasattr(self, "_original_async_generate"):
+            ollama_module.AsyncClient.generate = self._original_async_generate
+        if hasattr(self, "_original_async_embed"):
+            ollama_module.AsyncClient.embed = self._original_async_embed
+        if hasattr(self, "_original_async_embeddings"):
+            ollama_module.AsyncClient.embeddings = self._original_async_embeddings
