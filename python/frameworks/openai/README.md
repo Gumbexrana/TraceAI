@@ -45,3 +45,24 @@ Set up your OpenAI client with built-in observability. This includes support for
 from traceai_openai import OpenAIInstrumentor
 
 OpenAIInstrumentor().instrument(tracer_provider=trace_provider)
+```
+
+### Create OpenAI Components
+Set up your OpenAI client with built-in observability.  
+
+```python
+import openai
+
+openai.api_key = os.environ["OPENAI_API_KEY"]
+
+response = openai.ChatCompletion.create(
+    model="gpt-4-0",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Can you tell me a joke?"}
+    ]
+)
+
+print(response.choices[0].message['content'].strip())
+```
+
