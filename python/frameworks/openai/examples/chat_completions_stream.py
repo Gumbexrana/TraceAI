@@ -32,3 +32,18 @@ trace_provider = register(
     project_version_name="v1",
 )
 
+# Initialize the OpenAI instrumentor
+OpenAIInstrumentor().instrument(tracer_provider=trace_provider)
+
+
+if __name__ == "__main__":
+    client = openai.OpenAI()
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "Write a haiku."}],
+        max_tokens=20,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    for chunk in response:
+        print(chunk, end="")
