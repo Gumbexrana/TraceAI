@@ -58,3 +58,29 @@ if __name__ == "__main__":
                     "description": "finds the weather for a given city",
                     "parameters": {
                         "type": "object",
+                        "properties": {
+                            "city": {
+                                "type": "string",
+                                "description": "The city to find the weather for, e.g. 'London'",
+                            }
+                        },
+                        "required": ["city"],
+                    },
+                },
+            },
+        ],
+        messages=messages,
+    )
+    message = response.choices[0].message
+    assert (tool_calls := message.tool_calls)
+    tool_call_id = tool_calls[0].id
+    messages.append(message)
+    messages.append(
+        ChatCompletionToolMessageParam(
+            content="sunny", role="tool", tool_call_id=tool_call_id
+        ),
+    )
+    client.chat.completions.create(
+        model="gpt-4",
+        messages=messages,
+    )
