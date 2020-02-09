@@ -30,3 +30,17 @@ trace_provider = register(
     eval_tags=eval_tags,
     project_name="FUTURE_AGI",
     project_version_name="v1",
+)
+
+# Initialize the OpenAI instrumentor
+OpenAIInstrumentor().instrument(tracer_provider=trace_provider)
+
+
+if __name__ == "__main__":
+    client = openai.OpenAI()
+    response = client.chat.completions.with_raw_response.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "Write a story on AGI."}],
+        max_tokens=20,
+    )
+    print(response.parse().choices[0].message.content)
