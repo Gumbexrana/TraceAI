@@ -339,3 +339,150 @@ class _AsyncRequest(_WithTracer, _WithOpenAI):
         args: Tuple[type, Any],
         kwargs: Mapping[str, Any],
     ) -> Any:
+        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+            return await wrapped(*args, **kwargs)
+        try:
+            cast_to, request_parameters = _parse_request_args(args)
+            # Extract input data more robustly
+            input_data = request_parameters.get(
+                "messages", request_parameters.get("prompt")
+            )
+            llm_tools = request_parameters.get("tools")
+
+            span_name: str = cast_to.__name__.split(".")[-1]
+        except Exception:
+            logger.exception("Failed to parse request args")
+            return await wrapped(*args, **kwargs)
+        with self._start_as_current_span(
+            span_name=span_name,
+            attributes=chain(
+                self._get_attributes_from_instance(instance),
+                self._get_attributes_from_request(
+                    cast_to=cast_to,
+                    request_parameters=request_parameters,
+                ),
+            ),
+            context_attributes=get_attributes_from_context(),
+            extra_attributes=self._get_extra_attributes_from_request(
+                cast_to=cast_to,
+                request_parameters=request_parameters,
+            ),
+        ) as with_span:
+            # Add input data to span attributes before the request
+            with_span.set_attribute(
+                SpanAttributes.GEN_AI_TOOL_DEFINITIONS, safe_json_dumps(llm_tools)
+            )
+            add_io_to_span_attributes(with_span, input_data, None)
+            try:
+                response = await wrapped(*args, **kwargs)
+
+                if isinstance(response, CreateEmbeddingResponse):
+                    embedding = response.to_dict()
+                    with_span.set_attribute(
+                        SpanAttributes.EMBEDDING_EMBEDDINGS, safe_json_dumps(embedding)
+                    )
+
+                add_io_to_span_attributes(
+                    with_span, None, response, is_streaming=self._is_streaming(response)
+                )
+            except Exception as exception:
+                with_span.record_exception(exception)
+                status = trace_api.Status(
+                    status_code=trace_api.StatusCode.ERROR,
+                    # Follow the format in OTEL SDK for description, see:
+                    # https://github.com/open-telemetry/opentelemetry-python/blob/2b9dcfc5d853d1c10176937a6bcaade54cda1a31/opentelemetry-api/src/opentelemetry/trace/__init__.py#L588  # noqa E501
+                    description=f"{type(exception).__name__}: {exception}",
+                )
+                with_span.finish_tracing(status=status)
+                raise
+            try:
+                response = self._finalize_response(
+                    response=response,
+                    with_span=with_span,
+                    cast_to=cast_to,
+                    request_parameters=request_parameters,
+                )
+            except Exception:
+                logger.exception(
+                    f"Failed to finalize response of type {type(response)}"
+                )
+                with_span.finish_tracing()
+        return response
+
+
+def _parse_request_args(args: Tuple[type, Any]) -> Tuple[type, Mapping[str, Any]]:
+    # We don't use `signature(request).bind()` because `request` could have been monkey-patched
+    # (incorrectly) by others and the signature at runtime may not match the original.
+    # The targeted signature of `request` is here:
+    # https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/_base_client.py#L846-L847  # noqa: E501
+    cast_to: type = args[0]
+    request_parameters: Mapping[str, Any] = (
+        json_data
+        # See https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/_models.py#L427  # noqa: E501
+        if hasattr(args[1], "json_data")
+        and isinstance(json_data := args[1].json_data, Mapping)
+        else {}
+    )
+    # FIXME: Because request parameters is just a Mapping, it can contain any value as long as it
+    # serializes correctly in an HTTP request body. For example, Enum values may be present if a
+    # third-party library puts them there. Enums can turn into their intended string values via
+    # `json.dumps` when the final HTTP request body is serialized, but can pose problems when we
+    # try to extract attributes. However, this round-trip seems expensive, so we opted to treat
+    # only the Enums that we know about: e.g. message role sometimes can be an Enum, so we will
+    # convert it only when it's encountered.
+    # try:
+    #     request_parameters = json.loads(json.dumps(request_parameters))
+    # except Exception:
+    #     pass
+    return cast_to, request_parameters
+
+
+class _ResponseAttributes:
+    __slots__ = ("_response", "_request_parameters", "_response_attributes_extractor")
+
+    def __init__(
+        self,
+        response: Any,
+        request_parameters: Mapping[str, Any],
+        response_attributes_extractor: _ResponseAttributesExtractor,
+    ) -> None:
+        if hasattr(response, "parse") and callable(response.parse):
+            # E.g. see https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/_base_client.py#L518  # noqa: E501
+            try:
+                response = response.parse()
+            except Exception:
+                logger.exception(f"Failed to parse response of type {type(response)}")
+        self._request_parameters = request_parameters
+        self._response = response
+        self._response_attributes_extractor = response_attributes_extractor
+
+    def get_attributes(self) -> Iterator[Tuple[str, AttributeValue]]:
+        # Extract just the assistant's response content, not the full API response
+        output_content = None
+        response = self._response
+
+        if hasattr(response, "choices") and response.choices:
+            first_choice = response.choices[0]
+            if hasattr(first_choice, "message"):
+                message = first_choice.message
+                if hasattr(message, "tool_calls") and message.tool_calls:
+                    # Handle tool calls
+                    tool_calls = [
+                        f"Function: {tc.function.name}({tc.function.arguments})"
+                        for tc in message.tool_calls
+                        if tc.type == "function"
+                    ]
+                    output_content = " \n ".join(tool_calls)
+                elif getattr(message, "content", None):
+                    output_content = message.content
+            elif hasattr(first_choice, "text"):
+                output_content = first_choice.text
+
+        if output_content:
+            yield SpanAttributes.OUTPUT_VALUE, output_content
+
+    def get_extra_attributes(self) -> Iterator[Tuple[str, AttributeValue]]:
+        yield from self._response_attributes_extractor.get_attributes_from_response(
+            response=self._response,
+            request_parameters=self._request_parameters,
+        )
