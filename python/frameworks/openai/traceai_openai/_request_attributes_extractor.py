@@ -175,3 +175,80 @@ class _RequestAttributesExtractor:
                 if (function := tool_call.get("function")) and hasattr(function, "get"):
                     # See https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/types/chat/chat_completion_message_tool_call_param.py#L10  # noqa: E501
                     if name := function.get("name"):
+                        yield (
+                            f"{MessageAttributes.MESSAGE_TOOL_CALLS}.{index}."
+                            f"{ToolCallAttributes.TOOL_CALL_FUNCTION_NAME}",
+                            name,
+                        )
+                    if arguments := function.get("arguments"):
+                        yield (
+                            f"{MessageAttributes.MESSAGE_TOOL_CALLS}.{index}."
+                            f"{ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON}",
+                            arguments,
+                        )
+
+    def _get_attributes_from_message_content(
+        self,
+        content: Mapping[str, Any],
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        content = dict(content)
+        type_ = content.pop("type")
+        if type_ == "text":
+            yield f"{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "text"
+            if text := content.pop("text"):
+                yield f"{MessageContentAttributes.MESSAGE_CONTENT_TEXT}", text
+        elif type_ == "image_url":
+            if image := content.pop("image_url"):
+                yield f"{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "image"
+                yield f"{MessageContentAttributes.MESSAGE_CONTENT_IMAGE}", image.get(
+                    "url", ""
+                )
+        elif type_ == "input_audio":
+            if audio := content.pop("input_audio"):
+                yield f"{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "audio"
+                yield f"{MessageContentAttributes.MESSAGE_CONTENT_AUDIO}", audio.get(
+                    "data", ""
+                )
+
+    def _get_attributes_from_image(
+        self,
+        image: Mapping[str, Any],
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        image = dict(image)
+        if url := image.pop("url"):
+            yield f"{ImageAttributes.IMAGE_URL}", url
+
+
+def _get_attributes_from_completion_create_param(
+    params: Mapping[str, Any],
+) -> Iterator[Tuple[str, AttributeValue]]:
+    # openai.types.completion_create_params.CompletionCreateParamsBase
+    # See https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/types/completion_create_params.py#L11  # noqa: E501
+    if not isinstance(params, Mapping):
+        return
+    invocation_params = dict(params)
+    invocation_params.pop("prompt", None)
+    yield SpanAttributes.GEN_AI_REQUEST_PARAMETERS, safe_json_dumps(invocation_params)
+
+
+def _get_attributes_from_embedding_create_param(
+    params: Mapping[str, Any],
+) -> Iterator[Tuple[str, AttributeValue]]:
+    # openai.types.EmbeddingCreateParams
+    # See https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/types/embedding_create_params.py#L11  # noqa: E501
+    if not isinstance(params, Mapping):
+        return
+    invocation_params = dict(params)
+    invocation_params.pop("input", None)
+    yield SpanAttributes.GEN_AI_REQUEST_PARAMETERS, safe_json_dumps(invocation_params)
+
+
+T = TypeVar("T", bound=type)
+
+
+def is_iterable_of(lst: Iterable[object], tp: T) -> bool:
+    return isinstance(lst, Iterable) and all(isinstance(x, tp) for x in lst)
+
+
+def is_base64_url(url: str) -> bool:
+    return url.startswith("data:image/") and "base64" in url
