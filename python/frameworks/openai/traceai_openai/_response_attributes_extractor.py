@@ -215,3 +215,96 @@ class _ResponseAttributesExtractor:
 
     def _get_attributes_from_chat_completion_message(
         self,
+        message: object,
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        # openai.types.chat.ChatCompletionMessage
+        # See https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/types/chat/chat_completion_message.py#L25  # noqa: E501
+        if role := getattr(message, "role", None):
+            yield MessageAttributes.MESSAGE_ROLE, role
+        if content := getattr(message, "content", None):
+            yield MessageAttributes.MESSAGE_CONTENT, content
+        if audio := getattr(message, "audio", None):
+            # Handle audio attributes
+            yield f"{MessageAttributes.MESSAGE_CONTENT}.0.{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "audio"
+            if audio_data := getattr(audio, "data", None):
+                yield f"{MessageAttributes.MESSAGE_CONTENT}.0.{MessageContentAttributes.MESSAGE_CONTENT_AUDIO}", audio_data
+            if transcript := getattr(audio, "transcript", None):
+                yield f"{MessageAttributes.MESSAGE_CONTENT}.0.{MessageContentAttributes.MESSAGE_AUDIO_TRANSCRIPT}", transcript
+        if function_call := getattr(message, "function_call", None):
+            # See https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/types/chat/chat_completion_message.py#L12  # noqa: E501
+            if name := getattr(function_call, "name", None):
+                yield MessageAttributes.MESSAGE_FUNCTION_CALL_NAME, name
+            if arguments := getattr(function_call, "arguments", None):
+                yield MessageAttributes.MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON, arguments
+        if (
+            _get_openai_version() >= (1, 1, 0)
+            and (tool_calls := getattr(message, "tool_calls", None))
+            and isinstance(tool_calls, Iterable)
+        ):
+            # See https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/types/chat/chat_completion_message_tool_call.py#L23  # noqa: E501
+            for index, tool_call in enumerate(tool_calls):
+                if (tool_call_id := getattr(tool_call, "id", None)) is not None:
+                    # https://github.com/openai/openai-python/blob/891e1c17b7fecbae34d1915ba90c15ddece807f9/src/openai/types/chat/chat_completion_message_tool_call.py#L24
+                    yield (
+                        f"{MessageAttributes.MESSAGE_TOOL_CALLS}.{index}."
+                        f"{ToolCallAttributes.TOOL_CALL_ID}",
+                        tool_call_id,
+                    )
+                if function := getattr(tool_call, "function", None):
+                    # See https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/types/chat/chat_completion_message_tool_call.py#L10  # noqa: E501
+                    if name := getattr(function, "name", None):
+                        yield (
+                            (
+                                f"{MessageAttributes.MESSAGE_TOOL_CALLS}.{index}."
+                                f"{ToolCallAttributes.TOOL_CALL_FUNCTION_NAME}"
+                            ),
+                            name,
+                        )
+                    if arguments := getattr(function, "arguments", None):
+                        yield (
+                            f"{MessageAttributes.MESSAGE_TOOL_CALLS}.{index}."
+                            f"{ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON}",
+                            arguments,
+                        )
+
+    def _get_attributes_from_completion_usage(
+        self,
+        usage: object,
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        # openai.types.CompletionUsage
+        # See https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/types/completion_usage.py#L8  # noqa: E501
+        if (total_tokens := getattr(usage, "total_tokens", None)) is not None:
+            yield SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS, total_tokens
+        if (prompt_tokens := getattr(usage, "prompt_tokens", None)) is not None:
+            yield SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS, prompt_tokens
+        if (completion_tokens := getattr(usage, "completion_tokens", None)) is not None:
+            yield SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, completion_tokens
+
+    def _get_attributes_from_embedding_usage(
+        self,
+        usage: object,
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        # openai.types.create_embedding_response.Usage
+        # See https://github.com/openai/openai-python/blob/f1c7d714914e3321ca2e72839fe2d132a8646e7f/src/openai/types/create_embedding_response.py#L12  # noqa: E501
+        if (total_tokens := getattr(usage, "total_tokens", None)) is not None:
+            yield SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS, total_tokens
+        if (prompt_tokens := getattr(usage, "prompt_tokens", None)) is not None:
+            yield SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS, prompt_tokens
+
+    def _get_attributes_from_image_generation(
+        self,
+        data: Iterable[object],
+        request_parameters: Mapping[str, Any],
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        
+        if model := request_parameters.get("model"):
+            yield SpanAttributes.GEN_AI_REQUEST_MODEL, model
+
+        for index, obj in enumerate(data):
+            yield f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.{index}.{MessageAttributes.MESSAGE_ROLE}", "assistant"
+            if image := getattr(obj, "url", None):
+                yield f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.{index}.{MessageAttributes.MESSAGE_CONTENT}.0.{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "image"
+                yield f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.{index}.{MessageAttributes.MESSAGE_CONTENT}.0.{MessageContentAttributes.MESSAGE_CONTENT_IMAGE}", image
+            elif b64_json := getattr(obj, "b64_json", None):
+                yield f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.{index}.{MessageAttributes.MESSAGE_CONTENT}.0.{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "image"
+                yield f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.{index}.{MessageAttributes.MESSAGE_CONTENT}.0.{MessageContentAttributes.MESSAGE_CONTENT_IMAGE}", b64_json
