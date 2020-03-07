@@ -114,3 +114,54 @@ def add_io_to_span_attributes(
                 elif hasattr(first_choice, "delta"):
                     output_content = getattr(first_choice.delta, "content", "")
                 else:
+                    output_content = str(first_choice)
+            elif isinstance(output_data, dict) and "choices" in output_data:
+                first_choice = output_data["choices"][0]
+                message = first_choice.get("message", {})
+                if "tool_calls" in message and message["tool_calls"]:
+                    tool_calls = [
+                        f"Function: {tc['function']['name']}({tc['function']['arguments']})"
+                        for tc in message["tool_calls"]
+                        if tc.get("type") == "function"
+                    ]
+                    output_content = " \n ".join(tool_calls)
+                elif "content" in message:
+                    output_content = message["content"]
+            else:
+                output_content = str(output_data)
+
+            # Set output.value to just the assistant's response content
+            if output_content:
+                span.set_attribute(SpanAttributes.OUTPUT_VALUE, output_content)
+
+    except Exception as e:
+        logger.exception(f"Error adding I/O to span attributes: {e}")
+
+
+def add_stream_output_to_span(span: _WithSpan, chunk_data: Any) -> None:
+    """Add streaming output chunk to span attributes.
+
+    Args:
+        span: The span to add attributes to
+        chunk_data: The streaming chunk data to process
+    """
+    try:
+        output_content = None
+
+        # Extract content from chunk
+        if hasattr(chunk_data, "choices") and chunk_data.choices:
+            first_choice = chunk_data.choices[0]
+            if hasattr(first_choice, "delta"):
+                output_content = getattr(first_choice.delta, "content", "")
+            elif hasattr(first_choice, "text"):
+                output_content = first_choice.text
+            else:
+                output_content = str(first_choice)
+
+        # Only append non-empty content
+        if output_content and output_content.strip():
+            existing_output = span.get_attribute(SpanAttributes.OUTPUT_VALUE) or ""
+            updated_output = (existing_output + output_content).strip()
+            span.set_attribute(SpanAttributes.OUTPUT_VALUE, updated_output)
+    except Exception as e:
+        logger.exception(f"Error adding streaming output to span attributes: {e}")
