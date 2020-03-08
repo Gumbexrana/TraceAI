@@ -105,3 +105,49 @@ def _finish_tracing(
         with_span.finish_tracing(
             status=status,
             attributes=attributes,
+            extra_attributes=extra_attributes,
+        )
+    except Exception:
+        logger.exception("Failed to finish tracing")
+
+
+def _get_texts(
+    model_input: Optional[Union[str, List[str], List[int], List[List[int]]]],
+    model: Optional[str],
+) -> Iterator[str]:
+    if not model_input:
+        return
+    if isinstance(model_input, str):
+        text = model_input
+        yield text
+        return
+    if not isinstance(model_input, Sequence):
+        return
+    if any(not isinstance(item, str) for item in model_input):
+        # FIXME: We can't decode tokens (List[int]) reliably because the model name is not reliable,
+        # e.g. for text-embedding-ada-002 (cl100k_base), OpenAI returns "text-embedding-ada-002-v2",
+        # and Azure returns "ada", which refers to a different model (r50k_base). We could use the
+        # request model name instead, but that doesn't work for Azure because Azure uses the
+        # deployment name (which differs from the model name).
+        return
+    for text in cast(List[str], model_input):
+        yield text
+
+
+def _to_dict(value: Any) -> Any:
+    """
+    Recursively converts objects to dictionaries, focusing on essential data.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        return [_to_dict(item) for item in value]
+    if isinstance(value, dict):
+        return {k: _to_dict(v) for k, v in value.items()}
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        return _to_dict(value.to_dict())
+    if hasattr(value, "__dict__"):
+        return _to_dict(vars(value))
+    return str(value)
