@@ -123,3 +123,57 @@ class _AsyncStream(ObjectProxy):
         self._self_response_accumulator = response_accumulator
 
     def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            chunk = await self.__wrapped__.__anext__()
+        except StopAsyncIteration:
+            if not self._self_is_finished:
+                status = trace_api.Status(status_code=trace_api.StatusCode.OK)
+                self._finish_tracing(status=status)
+            raise
+        except Exception as exception:
+            if not self._self_is_finished:
+                status = trace_api.Status(
+                    status_code=trace_api.StatusCode.ERROR,
+                    description=f"{type(exception).__name__}: {exception}",
+                )
+                self._self_with_span.record_exception(exception)
+                self._finish_tracing(status=status)
+            raise
+        else:
+            self._process_chunk(chunk)
+            return chunk
+
+    def _process_chunk(self, chunk: Any) -> None:
+        if not self._self_iteration_count:
+            try:
+                self._self_with_span.add_event("First Token Stream Event")
+            except Exception:
+                logger.exception("Failed to add event to span")
+        self._self_iteration_count += 1
+        if self._self_response_accumulator is not None:
+            try:
+                self._self_response_accumulator.process_chunk(chunk)
+            except Exception:
+                logger.exception("Failed to accumulate response")
+
+    def _finish_tracing(
+        self,
+        status: Optional[trace_api.Status] = None,
+    ) -> None:
+        _finish_tracing(
+            status=status,
+            with_span=self._self_with_span,
+            has_attributes=self,
+        )
+        self._self_is_finished = True
+
+    def get_attributes(self) -> Iterator[Tuple[str, AttributeValue]]:
+        if self._self_response_accumulator is not None:
+            yield from self._self_response_accumulator.get_attributes()
+
+    def get_extra_attributes(self) -> Iterator[Tuple[str, AttributeValue]]:
+        if self._self_response_accumulator is not None:
+            yield from self._self_response_accumulator.get_extra_attributes()
