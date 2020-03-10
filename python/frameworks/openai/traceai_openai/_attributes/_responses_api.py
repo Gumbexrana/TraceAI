@@ -454,3 +454,199 @@ class _ResponsesApiAttributes:
             yield f"{prefix}{MessageAttributes.MESSAGE_TOOL_CALL_ID}", call_id
         if (output := obj.get("output")) is not None:
             yield f"{prefix}{MessageAttributes.MESSAGE_CONTENT}", output
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_input_text_param(
+        cls,
+        obj: responses.response_input_text_param.ResponseInputTextParam,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        if (text := obj.get("text")) is not None:
+            yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TEXT}", text
+            yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "text"
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_output_item(
+        cls,
+        obj: responses.response_output_item.ResponseOutputItem,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        if obj.type == "message":
+            yield from cls._get_attributes_from_response_output_message(obj, prefix)
+        elif obj.type == "function_call":
+            yield f"{prefix}{MessageAttributes.MESSAGE_ROLE}", "assistant"
+            yield from cls._get_attributes_from_response_function_tool_call(
+                obj,
+                f"{prefix}{MessageAttributes.MESSAGE_TOOL_CALLS}.0.",
+            )
+        elif obj.type == "file_search_call":
+            yield f"{prefix}{MessageAttributes.MESSAGE_ROLE}", "assistant"
+            yield from cls._get_attributes_from_response_file_search_tool_call(
+                obj,
+                f"{prefix}{MessageAttributes.MESSAGE_TOOL_CALLS}.0.",
+            )
+        elif obj.type == "computer_call":
+            yield f"{prefix}{MessageAttributes.MESSAGE_ROLE}", "assistant"
+            yield from cls._get_attributes_from_response_computer_tool_call(
+                obj,
+                f"{prefix}{MessageAttributes.MESSAGE_TOOL_CALLS}.0.",
+            )
+        elif obj.type == "reasoning":
+            yield f"{prefix}{MessageAttributes.MESSAGE_ROLE}", "assistant"
+            yield from cls._get_attributes_from_response_reasoning_item(obj, prefix)
+        elif obj.type == "web_search_call":
+            yield f"{prefix}{MessageAttributes.MESSAGE_ROLE}", "assistant"
+            yield from cls._get_attributes_from_response_function_web_search(
+                obj,
+                f"{prefix}{MessageAttributes.MESSAGE_TOOL_CALLS}.0.",
+            )
+        elif obj.type == "image_generation_call":
+            yield f"{prefix}{MessageAttributes.MESSAGE_ROLE}", "assistant"
+            yield from cls._get_attributes_from_response_image_generation_call(
+                obj,
+                f"{prefix}{MessageAttributes.MESSAGE_CONTENT}.0.",
+            )
+        elif obj.type == "code_interpreter_call":
+            # TODO: Handle code interpreter call
+            pass
+        elif obj.type == "local_shell_call":
+            # TODO: Handle local shell call
+            pass
+        elif obj.type == "mcp_call":
+            # TODO: Handle mcp call
+            pass
+        elif obj.type == "mcp_list_tools":
+            # TODO: Handle mcp list tools
+            pass
+        elif obj.type == "mcp_approval_request":
+            # TODO: Handle mcp approval request
+            pass
+        elif TYPE_CHECKING:
+            assert_never(obj.type)
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_output_message(
+        cls,
+        obj: responses.response_output_message.ResponseOutputMessage,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        yield f"{prefix}{MessageAttributes.MESSAGE_ROLE}", obj.role
+        yield from cls._get_attributes_from_output_message_content_list(obj.content, prefix)
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_output_refusal(
+        cls,
+        obj: responses.response_output_refusal.ResponseOutputRefusal,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "text"
+        yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TEXT}", obj.refusal
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_output_refusal_param(
+        cls,
+        obj: responses.response_output_refusal_param.ResponseOutputRefusalParam,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        if (refusal := obj.get("refusal")) is not None:
+            yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TEXT}", refusal
+            yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "text"
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_output_text(
+        cls,
+        obj: responses.response_output_text.ResponseOutputText,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "text"
+        yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TEXT}", obj.text
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_output_text_param(
+        cls,
+        obj: responses.response_output_text_param.ResponseOutputTextParam,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        if (text := obj.get("text")) is not None:
+            yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TEXT}", text
+            yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "text"
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_reasoning_item(
+        cls,
+        obj: responses.response_reasoning_item.ResponseReasoningItem,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        if isinstance(obj.summary, Iterable):
+            for i, item in enumerate(obj.summary):
+                yield from cls._get_attributes_from_response_reasoning_item_summary(
+                    item,
+                    f"{prefix}{MessageAttributes.MESSAGE_CONTENTS}.{i}.",
+                )
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_reasoning_item_param(
+        cls,
+        obj: responses.response_reasoning_item_param.ResponseReasoningItemParam,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        yield f"{prefix}{MessageAttributes.MESSAGE_ROLE}", "assistant"
+        if isinstance((summary := obj.get("summary")), Iterable):
+            for i, item in enumerate(summary):
+                if "type" not in item:
+                    continue
+                if item["type"] == "summary_text":
+                    yield from cls._get_attributes_from_response_reasoning_item_param_summary(
+                        item,
+                        f"{prefix}{MessageAttributes.MESSAGE_CONTENTS}.{i}.",
+                    )
+                elif TYPE_CHECKING:
+                    assert_never(item["type"])
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_reasoning_item_param_summary(
+        cls,
+        obj: responses.response_reasoning_item_param.Summary,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        if (text := obj.get("text")) is not None:
+            yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TEXT}", text
+            yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "text"
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_reasoning_item_summary(
+        cls,
+        obj: responses.response_reasoning_item.Summary,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "text"
+        yield f"{prefix}{MessageContentAttributes.MESSAGE_CONTENT_TEXT}", obj.text
+
+    @classmethod
+    @stop_on_exception
+    def _get_attributes_from_response_usage(
+        cls,
+        obj: responses.response_usage.ResponseUsage,
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        yield SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS, obj.total_tokens
+        yield SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS, obj.input_tokens
+        yield SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, obj.output_tokens
+        yield (
+            SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS_REASONING,
+            obj.output_tokens_details.reasoning_tokens,
+        )
+        yield (
+            SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS_CACHE_READ,
+            obj.input_tokens_details.cached_tokens,
+        )
