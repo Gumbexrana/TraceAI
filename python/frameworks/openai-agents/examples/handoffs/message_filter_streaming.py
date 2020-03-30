@@ -73,3 +73,116 @@ async def main():
             input=result.to_input_list()
             + [
                 {
+                    "content": "Can you generate a random number between 0 and 100?",
+                    "role": "user",
+                }
+            ],
+        )
+
+        print("Step 2 done")
+
+        # 3. Call the second agent
+        result = await Runner.run(
+            second_agent,
+            input=result.to_input_list()
+            + [
+                {
+                    "content": "I live in New York City. Whats the population of the city?",
+                    "role": "user",
+                }
+            ],
+        )
+
+        print("Step 3 done")
+
+        # 4. Cause a handoff to occur
+        stream_result = Runner.run_streamed(
+            second_agent,
+            input=result.to_input_list()
+            + [
+                {
+                    "content": "Por favor habla en español. ¿Cuál es mi nombre y dónde vivo?",
+                    "role": "user",
+                }
+            ],
+        )
+        async for _ in stream_result.stream_events():
+            pass
+
+        print("Step 4 done")
+
+    print("\n===Final messages===\n")
+
+    # 5. That should have caused spanish_handoff_message_filter to be called, which means the
+    # output should be missing the first two messages, and have no tool calls.
+    # Let's print the messages to see what happened
+    for item in stream_result.to_input_list():
+        print(json.dumps(item, indent=2))
+        """
+        $python examples/handoffs/message_filter_streaming.py
+        Step 1 done
+        Step 2 done
+        Step 3 done
+        Tu nombre y lugar de residencia no los tengo disponibles. Solo sé que mencionaste vivir en la ciudad de Nueva York.
+        Step 4 done
+
+        ===Final messages===
+
+        {
+            "content": "Can you generate a random number between 0 and 100?",
+            "role": "user"
+            }
+            {
+            "id": "...",
+            "content": [
+                {
+                "annotations": [],
+                "text": "Sure! Here's a random number between 0 and 100: **37**.",
+                "type": "output_text"
+                }
+            ],
+            "role": "assistant",
+            "status": "completed",
+            "type": "message"
+            }
+            {
+            "content": "I live in New York City. Whats the population of the city?",
+            "role": "user"
+            }
+            {
+            "id": "...",
+            "content": [
+                {
+                "annotations": [],
+                "text": "As of the latest estimates, New York City's population is approximately 8.5 million people. Would you like more information about the city?",
+                "type": "output_text"
+                }
+            ],
+            "role": "assistant",
+            "status": "completed",
+            "type": "message"
+            }
+            {
+            "content": "Por favor habla en espa\u00f1ol. \u00bfCu\u00e1l es mi nombre y d\u00f3nde vivo?",
+            "role": "user"
+            }
+            {
+            "id": "...",
+            "content": [
+                {
+                "annotations": [],
+                "text": "No s\u00e9 tu nombre, pero me dijiste que vives en Nueva York.",
+                "type": "output_text"
+                }
+            ],
+            "role": "assistant",
+            "status": "completed",
+            "type": "message"
+            }
+        """
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(main())
