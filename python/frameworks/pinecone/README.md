@@ -76,3 +76,122 @@ index.upsert(
 
 ### Query Attributes
 
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `db.vector.query.top_k` | int | Number of results requested |
+| `db.vector.query.filter` | string | JSON filter expression |
+| `db.vector.query.include_metadata` | bool | Whether metadata is included |
+| `db.vector.query.include_vectors` | bool | Whether vectors are included |
+| `db.vector.results.count` | int | Number of results returned |
+| `db.vector.results.scores` | string | JSON array of top scores |
+| `db.vector.results.ids` | string | JSON array of result IDs |
+
+### Upsert Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `db.vector.upsert.count` | int | Number of vectors upserted |
+| `db.vector.upsert.dimensions` | int | Vector dimensions |
+
+### Delete Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `db.vector.delete.count` | int | Number of vectors deleted |
+| `db.vector.delete.all` | bool | Whether all vectors deleted |
+
+## RAG Pipeline Example
+
+```python
+from fi_instrumentation import register
+from traceai_pinecone import PineconeInstrumentor
+from traceai_openai import OpenAIInstrumentor
+import pinecone
+import openai
+
+# Register tracer
+trace_provider = register(project_name="rag-pipeline")
+
+# Instrument both Pinecone and OpenAI
+PineconeInstrumentor().instrument(tracer_provider=trace_provider)
+OpenAIInstrumentor().instrument(tracer_provider=trace_provider)
+
+# Initialize clients
+pc = pinecone.Pinecone()
+index = pc.Index("documents")
+client = openai.OpenAI()
+
+def rag_query(question: str) -> str:
+    # 1. Generate embedding for question
+    embedding_response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=question
+    )
+    query_embedding = embedding_response.data[0].embedding
+
+    # 2. Search Pinecone for relevant documents
+    results = index.query(
+        vector=query_embedding,
+        top_k=5,
+        include_metadata=True
+    )
+
+    # 3. Build context from results
+    context = "\n".join([
+        match.metadata.get("text", "")
+        for match in results.matches
+    ])
+
+    # 4. Generate answer with context
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": f"Context:\n{context}"},
+            {"role": "user", "content": question}
+        ]
+    )
+
+    return response.choices[0].message.content
+
+# All steps are traced with correlated spans!
+answer = rag_query("What is retrieval augmented generation?")
+```
+
+## Testing
+
+### Unit Tests
+
+```bash
+cd python/frameworks/pinecone
+pip install pytest
+pytest tests/ -v
+```
+
+### Integration Tests
+
+Requires a Pinecone account and API key:
+
+```bash
+export PINECONE_API_KEY=your-api-key
+pytest tests/ -v -m integration
+```
+
+### Example
+
+Run the example RAG pipeline:
+
+```bash
+cd examples
+python basic_rag.py
+```
+
+## Resources
+
+- [Pinecone Documentation](https://docs.pinecone.io/)
+- [TraceAI Documentation](https://docs.futureagi.com/)
+- [OpenTelemetry Database Conventions](https://opentelemetry.io/docs/specs/semconv/database/)
+- [Vector DB Guide](../../docs/VECTOR_DB_GUIDE.md)
+
+## License
+
+Apache License 2.0
