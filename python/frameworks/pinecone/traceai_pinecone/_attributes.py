@@ -48,3 +48,80 @@ class VectorDBAttributes:
     INDEX_METRIC = "db.vector.index.metric"
     INDEX_DIMENSIONS = "db.vector.index.dimensions"
     INDEX_TYPE = "db.vector.index.type"
+
+    # Namespace/Partition
+    NAMESPACE = "db.vector.namespace"
+    PARTITION = "db.vector.partition"
+
+
+class VectorDBOperations:
+    """Standard operation names for vector databases."""
+
+    # Query operations
+    QUERY = "query"
+    SEARCH = "search"
+    SEARCH_BATCH = "search_batch"
+    HYBRID_SEARCH = "hybrid_search"
+    RECOMMEND = "recommend"
+    GET = "get"
+    FETCH = "fetch"
+    SCROLL = "scroll"
+
+    # Write operations
+    INSERT = "insert"
+    UPSERT = "upsert"
+    UPDATE = "update"
+    ADD = "add"
+
+    # Delete operations
+    DELETE = "delete"
+
+    # Stats/Info operations
+    COUNT = "count"
+    DESCRIBE = "describe"
+    DESCRIBE_INDEX_STATS = "describe_index_stats"
+    LIST = "list"
+
+
+def get_common_attributes(
+    db_system: str,
+    operation: str,
+    index_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Get common attributes for a vector DB operation.
+
+    Args:
+        db_system: Database system name (e.g., 'pinecone', 'chroma')
+        operation: Operation name (e.g., 'query', 'upsert')
+        index_name: Optional index or collection name
+
+    Returns:
+        Dictionary of span attributes
+    """
+    attributes = {
+        VectorDBAttributes.DB_SYSTEM: db_system,
+        VectorDBAttributes.DB_OPERATION_NAME: operation,
+    }
+
+    if index_name:
+        attributes[VectorDBAttributes.DB_NAMESPACE] = index_name
+        attributes[VectorDBAttributes.INDEX_NAME] = index_name
+
+    return attributes
+
+
+def safe_json_dumps(obj: Any) -> str:
+    """
+    Safely convert object to JSON string for span attributes.
+
+    Args:
+        obj: Object to serialize
+
+    Returns:
+        JSON string or string representation if serialization fails
+    """
+    try:
+        return json.dumps(obj)
+    except (TypeError, ValueError):
+        return str(obj)
