@@ -34,3 +34,19 @@ tracer_provider = register(
             custom_eval_name="Response_Quality"
         )
     ]
+)
+
+# Instrument the Portkey client
+PortkeyInstrumentor().instrument(tracer_provider=tracer_provider)
+
+
+# --- Your application logic remains the same! ---
+client = Portkey(virtual_key="your-portkey-virtual-key")
+
+completion = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Write a 6-word story about a robot who discovers music."}]
+)
+
+print(completion.choices[0].message.content)
+```
