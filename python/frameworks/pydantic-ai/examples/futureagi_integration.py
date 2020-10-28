@@ -46,3 +46,76 @@ def setup_futureagi_tracing():
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
 
+    provider = TracerProvider()
+    processor = SimpleSpanProcessor(ConsoleSpanExporter())
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+    return provider
+
+
+def main():
+    # Setup tracing (FutureAGI or console fallback)
+    provider = setup_futureagi_tracing()
+
+    # Initialize Pydantic AI instrumentation
+    from traceai_pydantic_ai import PydanticAIInstrumentor
+
+    PydanticAIInstrumentor().instrument(tracer_provider=provider)
+
+    # Import after instrumentation
+    from pydantic_ai import Agent, RunContext
+
+    # Create production-ready agent
+    agent = Agent(
+        "openai:gpt-4o-mini",
+        result_type=TaskResult,
+        instructions=(
+            "You are a task processing assistant. "
+            "Process tasks and return structured results. "
+            "Always include a unique task_id, status, result, and duration."
+        ),
+    )
+
+    # Processing tool
+    @agent.tool
+    def process_data(ctx: RunContext, data: str) -> str:
+        """Process incoming data.
+
+        Args:
+            data: Data to process.
+
+        Returns:
+            Processing result.
+        """
+        # Simulate processing
+        import time
+
+        start = time.time()
+        time.sleep(0.1)  # Simulate work
+        duration = time.time() - start
+
+        return f"Processed '{data}' in {duration:.3f}s"
+
+    # Run task
+    print("Processing task...")
+    result = agent.run_sync(
+        "Process the following data: 'user_registration_event_12345'"
+    )
+
+    task_result = result.output
+    print(f"\nTask ID: {task_result.task_id}")
+    print(f"Status: {task_result.status}")
+    print(f"Result: {task_result.result}")
+    print(f"Duration: {task_result.duration_seconds}s")
+
+    if result.usage:
+        print(f"\nToken Usage:")
+        print(f"  Input: {result.usage.request_tokens}")
+        print(f"  Output: {result.usage.response_tokens}")
+        print(f"  Total: {result.usage.total_tokens}")
+
+    print("\nTraces sent to FutureAGI platform (or console if no API key)")
+
+
+if __name__ == "__main__":
+    main()
