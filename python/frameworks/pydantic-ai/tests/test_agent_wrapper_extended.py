@@ -213,3 +213,327 @@ class TestExtractUsageEdgeCases:
 
         extracted = extract_usage(result)
         assert extracted["input_tokens"] == 0
+        assert extracted["output_tokens"] == 0
+        assert extracted["total_tokens"] == 0
+
+    def test_usage_attribute_error(self):
+        """Test usage when attributes raise errors."""
+        from traceai_pydantic_ai._agent_wrapper import extract_usage
+
+        result = MagicMock()
+        result.usage = None
+
+        extracted = extract_usage(result)
+        assert extracted is None
+
+
+class TestWrapAgentRunExtended:
+    """Extended tests for wrap_agent_run function."""
+
+    @pytest.mark.asyncio
+    async def test_async_wrapper_with_message_history(self):
+        """Test async wrapper with message history."""
+        from traceai_pydantic_ai._agent_wrapper import wrap_agent_run
+
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=None
+        )
+
+        mock_result = MagicMock()
+        mock_result.usage = None
+        mock_result.output = "response"
+
+        async def original_method(self, prompt, message_history=None):
+            return mock_result
+
+        mock_agent = MagicMock()
+        mock_agent.model = "openai:gpt-4o"
+        mock_agent.instructions = None
+        mock_agent.result_type = None
+
+        wrapped = wrap_agent_run(original_method, mock_tracer, "run")
+
+        # Pass message history
+        history = [{"role": "user", "content": "hello"}]
+        await wrapped(mock_agent, "Hi", message_history=history)
+
+        # Verify span was created with message history length
+        mock_tracer.start_as_current_span.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_wrapper_with_structured_output(self):
+        """Test async wrapper with structured output type."""
+        from traceai_pydantic_ai._agent_wrapper import wrap_agent_run
+
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=None
+        )
+
+        mock_result = MagicMock()
+        mock_result.usage = None
+        mock_result.output = {"city": "Paris", "country": "France"}
+
+        async def original_method(self, prompt):
+            return mock_result
+
+        class CityInfo:
+            pass
+
+        mock_agent = MagicMock()
+        mock_agent.model = "openai:gpt-4o"
+        mock_agent.instructions = None
+        mock_agent.result_type = CityInfo
+
+        wrapped = wrap_agent_run(original_method, mock_tracer, "run")
+        await wrapped(mock_agent, "Tell me about Paris")
+
+        mock_tracer.start_as_current_span.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_wrapper_with_dynamic_instructions(self):
+        """Test async wrapper with callable instructions."""
+        from traceai_pydantic_ai._agent_wrapper import wrap_agent_run
+
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=None
+        )
+
+        mock_result = MagicMock()
+        mock_result.usage = None
+        mock_result.output = "response"
+
+        async def original_method(self, prompt):
+            return mock_result
+
+        def dynamic_instructions(ctx):
+            return f"Be helpful for user {ctx.user_id}"
+
+        mock_agent = MagicMock()
+        mock_agent.model = "openai:gpt-4o"
+        mock_agent.instructions = dynamic_instructions
+        mock_agent.result_type = None
+
+        wrapped = wrap_agent_run(original_method, mock_tracer, "run")
+        await wrapped(mock_agent, "Hello")
+
+        mock_tracer.start_as_current_span.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_wrapper_with_usage_data(self):
+        """Test async wrapper records usage data."""
+        from traceai_pydantic_ai._agent_wrapper import wrap_agent_run
+
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=None
+        )
+
+        usage = MagicMock()
+        usage.request_tokens = 100
+        usage.response_tokens = 50
+        usage.total_tokens = 150
+
+        mock_result = MagicMock()
+        mock_result.usage = usage
+        mock_result.output = "response"
+
+        async def original_method(self, prompt):
+            return mock_result
+
+        mock_agent = MagicMock()
+        mock_agent.model = "openai:gpt-4o"
+        mock_agent.instructions = None
+        mock_agent.result_type = None
+
+        wrapped = wrap_agent_run(original_method, mock_tracer, "run")
+        result = await wrapped(mock_agent, "Hello")
+
+        assert result is mock_result
+        # Span should have been set with usage attributes
+        assert mock_span.set_attribute.called
+
+    def test_sync_wrapper_records_error(self):
+        """Test sync wrapper records errors properly."""
+        from traceai_pydantic_ai._agent_wrapper import wrap_agent_run
+
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=None
+        )
+
+        def original_method(self, prompt):
+            raise ValueError("Test error message")
+
+        mock_agent = MagicMock()
+        mock_agent.model = "openai:gpt-4o"
+
+        wrapped = wrap_agent_run(original_method, mock_tracer, "run_sync")
+
+        with pytest.raises(ValueError) as exc_info:
+            wrapped(mock_agent, "Hello")
+
+        assert str(exc_info.value) == "Test error message"
+        mock_span.record_exception.assert_called_once()
+
+
+class TestWrapToolFunctionExtended:
+    """Extended tests for wrap_tool_function."""
+
+    def test_tool_with_multiple_args(self):
+        """Test wrapping tool with multiple arguments."""
+        from traceai_pydantic_ai._agent_wrapper import wrap_tool_function
+
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=None
+        )
+
+        def original_tool(ctx, arg1, arg2, arg3):
+            return f"{arg1}-{arg2}-{arg3}"
+
+        wrapped = wrap_tool_function(original_tool, mock_tracer, "multi_arg_tool")
+        result = wrapped(MagicMock(), "a", "b", "c")
+
+        assert result == "a-b-c"
+
+    def test_tool_with_kwargs(self):
+        """Test wrapping tool with keyword arguments."""
+        from traceai_pydantic_ai._agent_wrapper import wrap_tool_function
+
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=None
+        )
+
+        def original_tool(ctx, *, name, age):
+            return f"{name} is {age}"
+
+        wrapped = wrap_tool_function(original_tool, mock_tracer, "kwargs_tool")
+        result = wrapped(MagicMock(), name="Alice", age=30)
+
+        assert result == "Alice is 30"
+
+    def test_tool_error_handling(self):
+        """Test tool error is recorded properly."""
+        from traceai_pydantic_ai._agent_wrapper import wrap_tool_function
+
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=None
+        )
+
+        def original_tool(ctx):
+            raise RuntimeError("Tool failed")
+
+        wrapped = wrap_tool_function(original_tool, mock_tracer, "failing_tool")
+
+        with pytest.raises(RuntimeError):
+            wrapped(MagicMock())
+
+        mock_span.record_exception.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_tool_error_handling(self):
+        """Test async tool error is recorded properly."""
+        from traceai_pydantic_ai._agent_wrapper import wrap_tool_function
+
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=None
+        )
+
+        async def original_tool(ctx):
+            raise RuntimeError("Async tool failed")
+
+        wrapped = wrap_tool_function(original_tool, mock_tracer, "async_failing_tool")
+
+        with pytest.raises(RuntimeError):
+            await wrapped(MagicMock())
+
+        mock_span.record_exception.assert_called_once()
+
+    def test_tool_preserves_function_metadata(self):
+        """Test that wrapped tool preserves function metadata."""
+        from traceai_pydantic_ai._agent_wrapper import wrap_tool_function
+
+        mock_tracer = MagicMock()
+
+        def original_tool(ctx, query: str) -> str:
+            """Search for information."""
+            return f"Result for {query}"
+
+        wrapped = wrap_tool_function(
+            original_tool,
+            mock_tracer,
+            "search_tool",
+            tool_description="Search for information",
+        )
+
+        assert wrapped.__name__ == "original_tool"
+        assert "Search" in (wrapped.__doc__ or "")
+
+
+class TestSpanNameConstants:
+    """Test span name constant values."""
+
+    def test_span_names_are_unique(self):
+        """Test that span names are unique."""
+        from traceai_pydantic_ai._agent_wrapper import (
+            AGENT_RUN_SPAN_NAME,
+            MODEL_REQUEST_SPAN_NAME,
+            TOOL_CALL_SPAN_NAME,
+        )
+
+        names = [AGENT_RUN_SPAN_NAME, MODEL_REQUEST_SPAN_NAME, TOOL_CALL_SPAN_NAME]
+        assert len(names) == len(set(names))
+
+    def test_span_names_follow_convention(self):
+        """Test that span names follow naming convention."""
+        from traceai_pydantic_ai._agent_wrapper import (
+            AGENT_RUN_SPAN_NAME,
+            MODEL_REQUEST_SPAN_NAME,
+            TOOL_CALL_SPAN_NAME,
+        )
+
+        for name in [AGENT_RUN_SPAN_NAME, MODEL_REQUEST_SPAN_NAME, TOOL_CALL_SPAN_NAME]:
+            assert name.startswith("pydantic_ai.")
+            assert "." in name
