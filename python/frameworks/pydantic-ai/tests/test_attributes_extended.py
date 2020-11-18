@@ -146,3 +146,226 @@ class TestGetModelProviderExtended:
         """Test various Google model names."""
         from traceai_pydantic_ai._attributes import get_model_provider
 
+        google_models = [
+            "gemini-pro",
+            "gemini-1.5-pro",
+            "gemini-1.5-flash",
+            "gemini-ultra",
+            "models/gemini-pro",
+            "models/gemini-1.5-pro-latest",
+        ]
+        for model in google_models:
+            assert get_model_provider(model) == "google", f"Failed for {model}"
+
+    def test_mistral_variants(self):
+        """Test various Mistral model names."""
+        from traceai_pydantic_ai._attributes import get_model_provider
+
+        mistral_models = [
+            "mistral-large",
+            "mistral-medium",
+            "mistral-small",
+            "mistral-7b",
+            "mistral-8x7b",
+        ]
+        for model in mistral_models:
+            assert get_model_provider(model) == "mistral", f"Failed for {model}"
+
+    def test_groq_variants(self):
+        """Test various Groq model names."""
+        from traceai_pydantic_ai._attributes import get_model_provider
+
+        groq_models = [
+            "groq-llama-3",
+            "groq-mixtral",
+        ]
+        for model in groq_models:
+            assert get_model_provider(model) == "groq", f"Failed for {model}"
+
+    def test_provider_prefix_extraction(self):
+        """Test provider:model format extraction."""
+        from traceai_pydantic_ai._attributes import get_model_provider
+
+        test_cases = [
+            ("openai:gpt-4o", "openai"),
+            ("anthropic:claude-3-opus", "anthropic"),
+            ("google-gla:gemini-1.5-pro", "google-gla"),
+            ("azure:gpt-4", "azure"),
+            # bedrock: matches the "bedrock" prefix in MODEL_PROVIDERS -> "aws"
+            ("bedrock:anthropic.claude-3", "aws"),
+            # vertex: matches the "vertex" prefix in MODEL_PROVIDERS -> "google"
+            ("vertex:gemini-pro", "google"),
+            ("ollama:llama3", "ollama"),
+            ("together:meta-llama/Llama-3", "together"),
+        ]
+        for model, expected in test_cases:
+            assert get_model_provider(model) == expected, f"Failed for {model}"
+
+    def test_case_insensitivity(self):
+        """Test model name case insensitivity."""
+        from traceai_pydantic_ai._attributes import get_model_provider
+
+        assert get_model_provider("GPT-4o") == "openai"
+        assert get_model_provider("CLAUDE-3-opus") == "anthropic"
+        assert get_model_provider("GEMINI-pro") == "google"
+
+    def test_deepseek_models(self):
+        """Test DeepSeek model detection."""
+        from traceai_pydantic_ai._attributes import get_model_provider
+
+        deepseek_models = [
+            "deepseek-chat",
+            "deepseek-coder",
+            "deepseek-reasoner",
+        ]
+        for model in deepseek_models:
+            assert get_model_provider(model) == "deepseek", f"Failed for {model}"
+
+    def test_cohere_models(self):
+        """Test Cohere model detection."""
+        from traceai_pydantic_ai._attributes import get_model_provider
+
+        cohere_models = [
+            "cohere-command",
+            "cohere-command-r",
+            "cohere-embed",
+        ]
+        for model in cohere_models:
+            assert get_model_provider(model) == "cohere", f"Failed for {model}"
+
+    def test_special_characters_in_model_name(self):
+        """Test handling of special characters."""
+        from traceai_pydantic_ai._attributes import get_model_provider
+
+        # Should handle without crashing
+        get_model_provider("model/with/slashes")
+        get_model_provider("model-with-dashes")
+        get_model_provider("model_with_underscores")
+        get_model_provider("model.with.dots")
+
+
+class TestModelProvidersMapping:
+    """Test MODEL_PROVIDERS mapping coverage."""
+
+    def test_major_providers_covered(self):
+        """Test major providers are in mapping."""
+        from traceai_pydantic_ai._attributes import MODEL_PROVIDERS
+
+        major_providers = [
+            "openai",
+            "gpt-",
+            "o1-",
+            "anthropic",
+            "claude-",
+            "gemini",
+            "mistral",
+            "groq",
+            "deepseek",
+            "cohere",
+            "ollama",
+        ]
+        for provider in major_providers:
+            assert provider in MODEL_PROVIDERS, f"Missing provider: {provider}"
+
+    def test_no_empty_values(self):
+        """Test no empty values in mapping."""
+        from traceai_pydantic_ai._attributes import MODEL_PROVIDERS
+
+        for key, value in MODEL_PROVIDERS.items():
+            assert key, "Empty key in MODEL_PROVIDERS"
+            assert value, "Empty value in MODEL_PROVIDERS"
+
+    def test_values_are_lowercase(self):
+        """Test all values are lowercase."""
+        from traceai_pydantic_ai._attributes import MODEL_PROVIDERS
+
+        for value in MODEL_PROVIDERS.values():
+            assert value == value.lower()
+
+
+class TestAttributeCategories:
+    """Test attribute categorization and organization."""
+
+    def test_agent_attributes_complete(self):
+        """Test agent-level attributes are complete."""
+        from traceai_pydantic_ai._attributes import PydanticAIAttributes
+
+        agent_attrs = [
+            "GEN_AI_AGENT_NAME",
+            "AGENT_MODEL",
+            "AGENT_MODEL_PROVIDER",
+            "AGENT_INSTRUCTIONS",
+            "AGENT_RESULT_TYPE",
+            "AGENT_DEPS_TYPE",
+        ]
+        for attr in agent_attrs:
+            assert hasattr(PydanticAIAttributes, attr), f"Missing {attr}"
+
+    def test_run_attributes_complete(self):
+        """Test run-level attributes are complete."""
+        from traceai_pydantic_ai._attributes import PydanticAIAttributes
+
+        run_attrs = [
+            "RUN_ID",
+            "RUN_METHOD",
+            "RUN_PROMPT",
+            "RUN_MESSAGE_HISTORY_LENGTH",
+            "RUN_RESULT",
+            "RUN_IS_STRUCTURED",
+        ]
+        for attr in run_attrs:
+            assert hasattr(PydanticAIAttributes, attr), f"Missing {attr}"
+
+    def test_tool_attributes_complete(self):
+        """Test tool-level attributes are complete."""
+        from traceai_pydantic_ai._attributes import PydanticAIAttributes
+
+        tool_attrs = [
+            "GEN_AI_TOOL_NAME",
+            "GEN_AI_TOOL_DESCRIPTION",
+            "TOOL_ARGS",
+            "TOOL_RESULT",
+            "TOOL_IS_ERROR",
+            "TOOL_ERROR_MESSAGE",
+            "TOOL_RETRY_COUNT",
+            "TOOL_DURATION_MS",
+        ]
+        for attr in tool_attrs:
+            assert hasattr(PydanticAIAttributes, attr), f"Missing {attr}"
+
+    def test_usage_attributes_complete(self):
+        """Test usage attributes are complete."""
+        from traceai_pydantic_ai._attributes import PydanticAIAttributes
+
+        usage_attrs = [
+            "USAGE_INPUT_TOKENS",
+            "USAGE_OUTPUT_TOKENS",
+            "USAGE_TOTAL_TOKENS",
+            "USAGE_CACHE_READ_TOKENS",
+            "USAGE_CACHE_CREATION_TOKENS",
+        ]
+        for attr in usage_attrs:
+            assert hasattr(PydanticAIAttributes, attr), f"Missing {attr}"
+
+    def test_error_attributes_complete(self):
+        """Test error attributes are complete."""
+        from traceai_pydantic_ai._attributes import PydanticAIAttributes
+
+        error_attrs = [
+            "ERROR_TYPE",
+            "ERROR_MESSAGE",
+            "IS_ERROR",
+        ]
+        for attr in error_attrs:
+            assert hasattr(PydanticAIAttributes, attr), f"Missing {attr}"
+
+    def test_stream_attributes_complete(self):
+        """Test streaming attributes are complete."""
+        from traceai_pydantic_ai._attributes import PydanticAIAttributes
+
+        stream_attrs = [
+            "STREAM_CHUNK_COUNT",
+            "STREAM_IS_STRUCTURED",
+        ]
+        for attr in stream_attrs:
+            assert hasattr(PydanticAIAttributes, attr), f"Missing {attr}"
