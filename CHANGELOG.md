@@ -299,4 +299,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 For questions about releases or to report issues, please visit our [GitHub Issues](https://github.com/future-agi/traceAI/issues).
 
 
-<!-- maintenance 2020 -->
+<!-- maintenance 2021 -->
