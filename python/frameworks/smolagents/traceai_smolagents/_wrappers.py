@@ -341,3 +341,150 @@ class _ModelWrapper:
                 dict(_llm_tools(arguments.get("tools_to_call_from", [])))
             )
             span.set_attributes(dict(_output_value_and_mime_type(output_message)))
+        return output_message
+
+
+class _ToolCallWrapper:
+    def __init__(self, tracer: trace_api.Tracer) -> None:
+        self._tracer = tracer
+
+    def __call__(
+        self,
+        wrapped: Callable[..., Any],
+        instance: Any,
+        args: Tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if context_api.get_value(context_api._SUPPRESS_INSTRUMENTATION_KEY):
+            return wrapped(*args, **kwargs)
+        span_name = f"{instance.__class__.__name__}"
+        with self._tracer.start_as_current_span(
+            span_name,
+            attributes={
+                GEN_AI_SPAN_KIND: TOOL,
+                INPUT_VALUE: _get_input_value(
+                    wrapped,
+                    *args,
+                    **kwargs,
+                ),
+                **dict(_tools(instance)),
+                **dict(get_attributes_from_context()),
+                **dict(_get_raw_input(args, **kwargs)),
+            },
+        ) as span:
+            response = wrapped(*args, **kwargs)
+            span.set_attribute(OUTPUT_VALUE, _get_raw_output(response))
+            span.set_status(trace_api.StatusCode.OK)
+            span.set_attributes(
+                dict(
+                    _output_value_and_mime_type_for_tool_span(
+                        response=response,
+                        output_type=instance.output_type,
+                    )
+                )
+            )
+        return response
+
+
+def _output_value_and_mime_type_for_tool_span(
+    response: Any, output_type: str
+) -> Iterator[Tuple[str, Any]]:
+    if output_type in (
+        "string",
+        "boolean",
+        "integer",
+        "number",
+    ):
+        yield OUTPUT_VALUE, response
+        yield OUTPUT_MIME_TYPE, TEXT
+    elif output_type == "object":
+        yield OUTPUT_VALUE, safe_json_dumps(response)
+        yield OUTPUT_MIME_TYPE, JSON
+
+    # TODO: handle other types
+
+
+def _get_raw_input(args: Any, **kwargs: Any) -> Iterator[Tuple[str, Any]]:
+    raw_input = safe_json_dumps({"args": _to_dict(args), **(_to_dict(kwargs) or {})})
+
+    yield INPUT_VALUE, raw_input
+
+
+def _get_raw_output(response: Any):
+    raw_output = _to_dict(response)
+
+    return safe_json_dumps(raw_output or {})
+
+
+def _to_dict(result: Any) -> Any:
+    if not result:
+        return {}
+    # this method has some Json serializability issue in the Smolagents library
+    # if isinstance(result, ChatMessage):
+    #     return result.dict()
+    if hasattr(result, "to_dict"):
+        return result.to_dict()
+    elif hasattr(result, "__dict__"):
+        return result.__dict__
+    elif isinstance(result, list):
+        return [_to_dict(item) for item in result]
+    elif isinstance(result, dict):
+        return {key: _to_dict(value) for key, value in result.items()}
+    else:
+        return result
+
+
+# span attributes
+INPUT_MIME_TYPE = SpanAttributes.INPUT_MIME_TYPE
+INPUT_VALUE = SpanAttributes.INPUT_VALUE
+GEN_AI_INPUT_MESSAGES = SpanAttributes.GEN_AI_INPUT_MESSAGES
+GEN_AI_REQUEST_PARAMETERS = SpanAttributes.GEN_AI_REQUEST_PARAMETERS
+GEN_AI_REQUEST_MODEL = SpanAttributes.GEN_AI_REQUEST_MODEL
+GEN_AI_OUTPUT_MESSAGES = SpanAttributes.GEN_AI_OUTPUT_MESSAGES
+GEN_AI_PROMPTS = SpanAttributes.GEN_AI_PROMPTS
+GEN_AI_USAGE_OUTPUT_TOKENS = SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
+GEN_AI_USAGE_INPUT_TOKENS = SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS
+GEN_AI_USAGE_TOTAL_TOKENS = SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS
+GEN_AI_TOOL_DEFINITIONS = SpanAttributes.GEN_AI_TOOL_DEFINITIONS
+GEN_AI_SPAN_KIND = SpanAttributes.GEN_AI_SPAN_KIND
+OUTPUT_MIME_TYPE = SpanAttributes.OUTPUT_MIME_TYPE
+OUTPUT_VALUE = SpanAttributes.OUTPUT_VALUE
+GEN_AI_TOOL_DESCRIPTION = SpanAttributes.GEN_AI_TOOL_DESCRIPTION
+GEN_AI_TOOL_NAME = SpanAttributes.GEN_AI_TOOL_NAME
+TOOL_PARAMETERS = SpanAttributes.TOOL_PARAMETERS
+
+# message attributes
+MESSAGE_CONTENT = MessageAttributes.MESSAGE_CONTENT
+MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON = (
+    MessageAttributes.MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON
+)
+MESSAGE_FUNCTION_CALL_NAME = MessageAttributes.MESSAGE_FUNCTION_CALL_NAME
+MESSAGE_NAME = MessageAttributes.MESSAGE_NAME
+MESSAGE_ROLE = MessageAttributes.MESSAGE_ROLE
+MESSAGE_TOOL_CALLS = MessageAttributes.MESSAGE_TOOL_CALLS
+
+# message content attributes
+MESSAGE_CONTENT_TYPE = MessageContentAttributes.MESSAGE_CONTENT_TYPE
+MESSAGE_CONTENT_IMAGE = MessageContentAttributes.MESSAGE_CONTENT_IMAGE
+MESSAGE_CONTENT_TEXT = MessageContentAttributes.MESSAGE_CONTENT_TEXT
+MESSAGE_CONTENT_AUDIO = MessageContentAttributes.MESSAGE_CONTENT_AUDIO
+MESSAGE_AUDIO_TRANSCRIPT = MessageContentAttributes.MESSAGE_AUDIO_TRANSCRIPT
+
+
+# mime types
+JSON = FiMimeTypeValues.JSON.value
+TEXT = FiMimeTypeValues.TEXT.value
+
+# span kinds
+AGENT = FiSpanKindValues.AGENT.value
+CHAIN = FiSpanKindValues.CHAIN.value
+LLM = FiSpanKindValues.LLM.value
+TOOL = FiSpanKindValues.TOOL.value
+
+# tool attributes
+TOOL_JSON_SCHEMA = ToolAttributes.TOOL_JSON_SCHEMA
+
+# tool call attributes
+TOOL_CALL_FUNCTION_ARGUMENTS_JSON = ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON
+TOOL_CALL_FUNCTION_NAME = ToolCallAttributes.TOOL_CALL_FUNCTION_NAME
+TOOL_CALL_ID = ToolCallAttributes.TOOL_CALL_ID
