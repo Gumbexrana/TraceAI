@@ -43,3 +43,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+strands = [
+    "strands-agents>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/futureagi/traceai"
+Documentation = "https://docs.futureagi.com/traceai"
+Repository = "https://github.com/futureagi/traceai"
+
+[tool.hatch.build.targets.wheel]
+packages = ["traceai_strands"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
