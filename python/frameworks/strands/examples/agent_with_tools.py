@@ -91,3 +91,43 @@ def search_database(
 
 
 def main():
+    # Create an agent with tools
+    agent = Agent(
+        model="us.anthropic.claude-sonnet-4-20250514-v1:0",
+        system_prompt="""You are a helpful assistant with access to tools.
+        Use the appropriate tool when needed to answer questions.
+        Always explain what you're doing.""",
+        tools=[calculate, get_weather, search_database],
+        trace_attributes={
+            "session.id": "tools-demo-001",
+            "tags": ["demo", "tools"],
+        },
+    )
+
+    # Test queries that require different tools
+    queries = [
+        "What is 15 multiplied by 7?",
+        "What's the weather like in Tokyo?",
+        "Tell me about Python programming.",
+        "Can you calculate 100 divided by 4 and then tell me the weather in London?",
+    ]
+
+    print("=" * 60)
+    print("Strands Agent with Tools Demo")
+    print("=" * 60)
+    print(f"\nAvailable tools: calculate, get_weather, search_database")
+
+    for query in queries:
+        print(f"\n{'-' * 60}")
+        print(f"User: {query}")
+        response = agent(query)
+        print(f"Agent: {response}")
+
+    print("\n" + "=" * 60)
+    print("All tool executions have been traced!")
+    print("View the traces in your TraceAI dashboard.")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
