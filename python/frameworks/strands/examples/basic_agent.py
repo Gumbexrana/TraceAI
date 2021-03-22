@@ -42,3 +42,22 @@ def main():
         "What is the capital of France?",
         "What's the population there?",
         "What's a famous landmark?",
+    ]
+
+    print("=" * 60)
+    print("Basic Strands Agent Demo with TraceAI")
+    print("=" * 60)
+
+    for question in questions:
+        print(f"\nUser: {question}")
+        response = agent(question)
+        print(f"Agent: {response}")
+
+    print("\n" + "=" * 60)
+    print("Traces have been sent to TraceAI!")
+    print("View them in your TraceAI dashboard.")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
