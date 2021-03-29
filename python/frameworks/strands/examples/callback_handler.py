@@ -51,3 +51,27 @@ def main():
     print("Strands Callback Handler Demo")
     print("=" * 60)
 
+    # Simulate agent lifecycle events manually
+    # (In real usage, Strands calls these automatically)
+
+    prompt = "Explain quantum computing in simple terms."
+    print(f"\nUser: {prompt}")
+
+    # These would be called by Strands internally
+    callback.on_agent_start(agent, prompt)
+
+    # Make the actual call
+    response = agent(prompt)
+
+    callback.on_agent_end(agent, response)
+
+    print(f"Agent: {response}")
+
+    print("\n" + "=" * 60)
+    print("Callback events have been traced!")
+    print("View the detailed spans in your TraceAI dashboard.")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
