@@ -63,3 +63,31 @@ def main():
 
     # Create agent with traced attributes
     agent = create_traced_agent(
+        model="us.anthropic.claude-sonnet-4-20250514-v1:0",
+        system_prompt="""You are a helpful assistant with access to MCP tools.
+        Use the calculator for math operations and format results nicely.""",
+        tools=[format_result],  # Add mcp_tools here when MCP server is available
+        session_id="mcp-demo-001",
+        tags=["demo", "mcp"],
+    )
+
+    # Test queries
+    queries = [
+        "Calculate 25 times 4 and format the result as a summary.",
+        "What is the square root of 144? Format as JSON.",
+    ]
+
+    for query in queries:
+        print(f"\n{'-' * 60}")
+        print(f"User: {query}")
+        response = agent(query)
+        print(f"Agent: {response}")
+
+    print("\n" + "=" * 60)
+    print("MCP tool calls have been traced!")
+    print("View the traces in your TraceAI dashboard.")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
