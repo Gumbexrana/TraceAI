@@ -161,3 +161,74 @@ class TestGetModelAttributes:
         assert attrs[SpanAttributes.STRANDS_MODEL_PROVIDER] == "openai"
 
     def test_model_with_parameters(self):
+        """Test extracting model parameters."""
+        model = MagicMock()
+        model.model_id = "gpt-4"
+        model.temperature = 0.7
+        model.max_tokens = 1000
+        model.top_p = 0.9
+
+        attrs = get_model_attributes(model)
+
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_TEMPERATURE] == 0.7
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS] == 1000
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_TOP_P] == 0.9
+
+    def test_model_with_response_usage(self, mock_response):
+        """Test extracting usage from response."""
+        model = MagicMock()
+        model.model_id = "gpt-4"
+
+        attrs = get_model_attributes(model, mock_response)
+
+        assert attrs[SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS] == 100
+        assert attrs[SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS] == 50
+        assert attrs[SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS] == 150
+
+    def test_model_with_cache_metrics(self):
+        """Test extracting Bedrock cache metrics."""
+        model = MagicMock()
+        model.model_id = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+
+        response = MagicMock()
+        response.usage = MagicMock()
+        response.usage.input_tokens = 100
+        response.usage.output_tokens = 50
+        response.usage.cache_read_input_tokens = 80
+        response.usage.cache_creation_input_tokens = 20
+
+        attrs = get_model_attributes(model, response)
+
+        assert attrs[SpanAttributes.STRANDS_CACHE_READ_TOKENS] == 80
+        assert attrs[SpanAttributes.STRANDS_CACHE_WRITE_TOKENS] == 20
+
+
+class TestGetTraceAttributesFromConfig:
+    """Tests for get_trace_attributes_from_config function."""
+
+    def test_all_attributes(self):
+        """Test creating trace attributes with all options."""
+        attrs = get_trace_attributes_from_config(
+            session_id="sess-123",
+            user_id="user@example.com",
+            tags=["production", "chatbot"],
+            metadata={"env": "prod"},
+        )
+
+        assert attrs["session.id"] == "sess-123"
+        assert attrs["user.id"] == "user@example.com"
+        assert attrs["tags"] == ["production", "chatbot"]
+        assert attrs["env"] == "prod"
+
+    def test_partial_attributes(self):
+        """Test creating trace attributes with partial options."""
+        attrs = get_trace_attributes_from_config(session_id="sess-123")
+
+        assert attrs["session.id"] == "sess-123"
+        assert "user.id" not in attrs
+
+    def test_empty_attributes(self):
+        """Test creating trace attributes with no options."""
+        attrs = get_trace_attributes_from_config()
+
+        assert attrs == {}
