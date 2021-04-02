@@ -135,3 +135,63 @@ class MockStrandsTelemetry:
     def setup_otlp_exporter(self, **kwargs):
         return self
 
+    def setup_console_exporter(self, **kwargs):
+        return self
+
+    def setup_meter(self, **kwargs):
+        return self
+
+
+mock_strands_telemetry = MagicMock()
+mock_strands_telemetry.StrandsTelemetry = MockStrandsTelemetry
+
+sys.modules["strands"] = MagicMock()
+sys.modules["strands.telemetry"] = mock_strands_telemetry
+
+
+import pytest
+
+
+@pytest.fixture
+def mock_tracer_provider():
+    """Create a mock tracer provider for testing."""
+    return MockTracerProvider()
+
+
+@pytest.fixture
+def mock_tracer(mock_tracer_provider):
+    """Create a mock tracer for testing."""
+    return mock_tracer_provider.get_tracer("test")
+
+
+@pytest.fixture
+def mock_agent():
+    """Create a mock Strands Agent for testing."""
+    agent = MagicMock()
+    agent.system_prompt = "You are a helpful assistant."
+    agent.model = MagicMock()
+    agent.model.model_id = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    agent.tools = []
+    agent.trace_attributes = {}
+    return agent
+
+
+@pytest.fixture
+def mock_tool():
+    """Create a mock Strands tool for testing."""
+    def calculator(x: int, y: int) -> int:
+        """Calculate the sum of two numbers."""
+        return x + y
+
+    return calculator
+
+
+@pytest.fixture
+def mock_response():
+    """Create a mock agent response for testing."""
+    response = MagicMock()
+    response.content = "Hello! How can I help you today?"
+    response.usage = MagicMock()
+    response.usage.input_tokens = 100
+    response.usage.output_tokens = 50
+    return response
