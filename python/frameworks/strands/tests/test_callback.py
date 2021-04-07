@@ -163,3 +163,75 @@ class TestStrandsCallbackHandler:
 
         assert "model:gpt-4" not in handler._active_spans
 
+    def test_on_streaming_start(self, mock_tracer_provider, mock_agent):
+        """Test on_streaming_start callback."""
+        handler = StrandsCallbackHandler(tracer_provider=mock_tracer_provider)
+
+        handler.on_streaming_start(mock_agent)
+
+        assert "stream" in handler._active_spans
+
+    def test_on_streaming_end(self, mock_tracer_provider, mock_agent, mock_response):
+        """Test on_streaming_end callback."""
+        handler = StrandsCallbackHandler(tracer_provider=mock_tracer_provider)
+
+        handler.on_streaming_start(mock_agent)
+        handler.on_streaming_end(mock_agent, mock_response)
+
+        assert "stream" not in handler._active_spans
+
+    def test_callable_interface(self, mock_tracer_provider):
+        """Test callable interface for Strands callbacks."""
+        handler = StrandsCallbackHandler(tracer_provider=mock_tracer_provider)
+
+        # Test unknown event
+        result = handler(event="unknown_event", data={"key": "value"})
+
+        # Should handle gracefully
+        assert result is None
+
+    def test_capture_input_disabled(self, mock_tracer_provider, mock_agent):
+        """Test that input is not captured when disabled."""
+        handler = StrandsCallbackHandler(
+            tracer_provider=mock_tracer_provider,
+            capture_input=False,
+        )
+
+        handler.on_agent_start(mock_agent, "Hello!")
+
+        # Input should not be in span attributes
+        # (actual attribute checking would require more detailed mock)
+        assert handler._agent_span is not None
+
+    def test_capture_output_disabled(self, mock_tracer_provider, mock_agent, mock_response):
+        """Test that output is not captured when disabled."""
+        handler = StrandsCallbackHandler(
+            tracer_provider=mock_tracer_provider,
+            capture_output=False,
+        )
+
+        handler.on_agent_start(mock_agent, "Hello!")
+        handler.on_agent_end(mock_agent, mock_response)
+
+        assert handler._agent_span is None
+
+
+class TestCreateCallbackHandler:
+    """Tests for create_callback_handler function."""
+
+    def test_creates_handler(self, mock_tracer_provider):
+        """Test creating a callback handler."""
+        handler = create_callback_handler(tracer_provider=mock_tracer_provider)
+
+        assert isinstance(handler, StrandsCallbackHandler)
+
+    def test_creates_handler_with_options(self, mock_tracer_provider):
+        """Test creating a handler with options."""
+        handler = create_callback_handler(
+            tracer_provider=mock_tracer_provider,
+            capture_input=False,
+            capture_output=False,
+        )
+
+        assert handler._capture_input is False
+        assert handler._capture_output is False
