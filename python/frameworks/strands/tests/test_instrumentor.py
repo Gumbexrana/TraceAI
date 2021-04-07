@@ -126,3 +126,59 @@ class TestConfigureStrandsTracing:
         """Test configuration with custom headers."""
         with patch.dict(os.environ, {}, clear=True):
             configure_strands_tracing(
+                tracer_provider=mock_tracer_provider,
+                otlp_endpoint="http://localhost:4318",
+                otlp_headers={"Authorization": "Bearer token"},
+            )
+
+            headers = os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", "")
+            assert "Authorization=Bearer token" in headers
+
+
+class TestCreateTracedAgent:
+    """Tests for create_traced_agent function."""
+
+    def test_creates_agent_with_trace_attributes(self):
+        """Test creating agent with trace attributes."""
+        # Mock strands.Agent
+        mock_agent_class = MagicMock()
+        mock_agent_instance = MagicMock()
+        mock_agent_class.return_value = mock_agent_instance
+
+        with patch.dict("sys.modules", {"strands": MagicMock(Agent=mock_agent_class)}):
+            from traceai_strands._instrumentor import create_traced_agent
+
+            agent = create_traced_agent(
+                model="gpt-4",
+                system_prompt="You are helpful.",
+                session_id="sess-123",
+                user_id="user@example.com",
+                tags=["production"],
+            )
+
+            # Verify Agent was called with trace_attributes
+            call_kwargs = mock_agent_class.call_args[1]
+            assert "trace_attributes" in call_kwargs
+            assert call_kwargs["trace_attributes"]["session.id"] == "sess-123"
+            assert call_kwargs["trace_attributes"]["user.id"] == "user@example.com"
+            assert call_kwargs["trace_attributes"]["tags"] == ["production"]
+
+    def test_merges_existing_trace_attributes(self):
+        """Test that existing trace_attributes are merged."""
+        mock_agent_class = MagicMock()
+        mock_agent_instance = MagicMock()
+        mock_agent_class.return_value = mock_agent_instance
+
+        with patch.dict("sys.modules", {"strands": MagicMock(Agent=mock_agent_class)}):
+            from traceai_strands._instrumentor import create_traced_agent
+
+            agent = create_traced_agent(
+                model="gpt-4",
+                system_prompt="You are helpful.",
+                session_id="sess-123",
+                trace_attributes={"custom": "value"},
+            )
+
+            call_kwargs = mock_agent_class.call_args[1]
+            assert call_kwargs["trace_attributes"]["session.id"] == "sess-123"
+            assert call_kwargs["trace_attributes"]["custom"] == "value"
