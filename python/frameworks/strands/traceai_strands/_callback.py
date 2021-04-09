@@ -163,3 +163,252 @@ class StrandsCallbackHandler:
         # Calculate duration
         if self._start_time:
             duration = time.time() - self._start_time
+            self._agent_span.set_attribute("gen_ai.latency_ms", duration * 1000)
+
+        self._agent_span.set_status(Status(StatusCode.OK))
+        self._agent_span.end()
+        self._agent_span = None
+        self._start_time = None
+
+    def on_agent_error(self, agent: Any, error: Exception) -> None:
+        """Called when an agent encounters an error.
+
+        Args:
+            agent: The Strands Agent instance.
+            error: The exception that occurred.
+        """
+        if self._agent_span is None:
+            return
+
+        self._agent_span.record_exception(error)
+        self._agent_span.set_status(
+            Status(StatusCode.ERROR, str(error))
+        )
+        self._agent_span.end()
+        self._agent_span = None
+        self._start_time = None
+
+    def on_tool_start(self, tool: Any, args: Dict[str, Any]) -> None:
+        """Called when a tool starts execution.
+
+        Args:
+            tool: The tool being executed.
+            args: The arguments passed to the tool.
+        """
+        tool_name = getattr(tool, "__name__", None) or getattr(tool, "name", "unknown_tool")
+
+        attrs = get_tool_attributes(tool)
+        attrs["gen_ai.operation.name"] = "tool.execute"
+
+        if self._capture_input:
+            attrs[SpanAttributes.TOOL_PARAMETERS] = safe_serialize(args)
+
+        span = self._tracer.start_span(
+            name=f"strands.tool.{tool_name}",
+            kind=SpanKind.INTERNAL,
+            attributes=attrs,
+        )
+
+        self._active_spans[f"tool:{tool_name}"] = span
+
+    def on_tool_end(self, tool: Any, result: Any) -> None:
+        """Called when a tool finishes execution.
+
+        Args:
+            tool: The tool that was executed.
+            result: The tool's result.
+        """
+        tool_name = getattr(tool, "__name__", None) or getattr(tool, "name", "unknown_tool")
+        span_key = f"tool:{tool_name}"
+
+        span = self._active_spans.pop(span_key, None)
+        if span is None:
+            return
+
+        if self._capture_output:
+            span.set_attribute(SpanAttributes.TOOL_RESULT, safe_serialize(result))
+
+        span.set_status(Status(StatusCode.OK))
+        span.end()
+
+    def on_tool_error(self, tool: Any, error: Exception) -> None:
+        """Called when a tool encounters an error.
+
+        Args:
+            tool: The tool that was executed.
+            error: The exception that occurred.
+        """
+        tool_name = getattr(tool, "__name__", None) or getattr(tool, "name", "unknown_tool")
+        span_key = f"tool:{tool_name}"
+
+        span = self._active_spans.pop(span_key, None)
+        if span is None:
+            return
+
+        span.record_exception(error)
+        span.set_status(Status(StatusCode.ERROR, str(error)))
+        span.end()
+
+    def on_model_start(self, model: Any, messages: Any) -> None:
+        """Called when a model inference starts.
+
+        Args:
+            model: The model provider instance.
+            messages: The messages being sent to the model.
+        """
+        model_name = getattr(model, "model_id", None) or getattr(model, "model", "unknown")
+        provider = get_model_provider(model_name)
+
+        attrs = {
+            SpanAttributes.GEN_AI_REQUEST_MODEL: model_name,
+            SpanAttributes.STRANDS_MODEL_PROVIDER: provider,
+            SpanAttributes.GEN_AI_PROVIDER_NAME: provider,
+            "gen_ai.operation.name": "chat",
+        }
+
+        if self._capture_input:
+            attrs["gen_ai.prompt"] = safe_serialize(messages)
+
+        span = self._tracer.start_span(
+            name=f"strands.model.{provider}",
+            kind=SpanKind.CLIENT,
+            attributes=attrs,
+        )
+
+        self._active_spans[f"model:{model_name}"] = span
+
+    def on_model_end(self, model: Any, response: Any) -> None:
+        """Called when a model inference completes.
+
+        Args:
+            model: The model provider instance.
+            response: The model's response.
+        """
+        model_name = getattr(model, "model_id", None) or getattr(model, "model", "unknown")
+        span_key = f"model:{model_name}"
+
+        span = self._active_spans.pop(span_key, None)
+        if span is None:
+            return
+
+        # Extract usage from response
+        usage = getattr(response, "usage", None)
+        if usage:
+            input_tokens = getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", None)
+            output_tokens = getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", None)
+
+            if input_tokens is not None:
+                span.set_attribute(SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS, input_tokens)
+            if output_tokens is not None:
+                span.set_attribute(SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, output_tokens)
+            if input_tokens and output_tokens:
+                span.set_attribute(SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS, input_tokens + output_tokens)
+
+        if self._capture_output:
+            content = getattr(response, "content", None) or getattr(response, "text", None)
+            if content:
+                span.set_attribute("gen_ai.completion", safe_serialize(content))
+
+        span.set_status(Status(StatusCode.OK))
+        span.end()
+
+    def on_model_error(self, model: Any, error: Exception) -> None:
+        """Called when a model inference fails.
+
+        Args:
+            model: The model provider instance.
+            error: The exception that occurred.
+        """
+        model_name = getattr(model, "model_id", None) or getattr(model, "model", "unknown")
+        span_key = f"model:{model_name}"
+
+        span = self._active_spans.pop(span_key, None)
+        if span is None:
+            return
+
+        span.record_exception(error)
+        span.set_status(Status(StatusCode.ERROR, str(error)))
+        span.end()
+
+    def on_streaming_start(self, agent: Any) -> None:
+        """Called when streaming response starts.
+
+        Args:
+            agent: The Strands Agent instance.
+        """
+        span = self._tracer.start_span(
+            name="strands.stream",
+            kind=SpanKind.INTERNAL,
+            attributes={"gen_ai.operation.name": "stream"},
+        )
+        self._active_spans["stream"] = span
+
+    def on_streaming_chunk(self, chunk: Any) -> None:
+        """Called for each streaming chunk.
+
+        Args:
+            chunk: The streaming chunk data.
+        """
+        span = self._active_spans.get("stream")
+        if span:
+            # Increment chunk counter
+            current_count = span.attributes.get("gen_ai.stream.chunk_count", 0)
+            span.set_attribute("gen_ai.stream.chunk_count", current_count + 1)
+
+    def on_streaming_end(self, agent: Any, response: Any) -> None:
+        """Called when streaming response completes.
+
+        Args:
+            agent: The Strands Agent instance.
+            response: The complete response.
+        """
+        span = self._active_spans.pop("stream", None)
+        if span:
+            if self._capture_output:
+                span.set_attribute("gen_ai.completion", safe_serialize(response))
+            span.set_status(Status(StatusCode.OK))
+            span.end()
+
+    def _on_generic_event(
+        self, event: str, data: Any, kwargs: Dict[str, Any]
+    ) -> None:
+        """Handle generic/unknown events.
+
+        Args:
+            event: The event name.
+            data: The event data.
+            kwargs: Additional keyword arguments.
+        """
+        # Create a span for unknown events for debugging
+        with self._tracer.start_as_current_span(
+            name=f"strands.event.{event}",
+            kind=SpanKind.INTERNAL,
+        ) as span:
+            span.set_attribute("strands.event.type", event)
+            if data:
+                span.set_attribute("strands.event.data", safe_serialize(data, max_length=1000))
+
+
+def create_callback_handler(
+    tracer_provider: Optional[trace.TracerProvider] = None,
+    capture_input: bool = True,
+    capture_output: bool = True,
+) -> StrandsCallbackHandler:
+    """Create a configured callback handler.
+
+    This is a convenience function for creating a StrandsCallbackHandler
+    with common configuration options.
+
+    Args:
+        tracer_provider: Optional OpenTelemetry tracer provider.
+        capture_input: Whether to capture input prompts.
+        capture_output: Whether to capture output responses.
+
+    Returns:
+        Configured StrandsCallbackHandler instance.
+    """
+    return StrandsCallbackHandler(
+        tracer_provider=tracer_provider,
+        capture_input=capture_input,
+        capture_output=capture_output,
+    )
