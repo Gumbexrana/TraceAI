@@ -61,3 +61,98 @@ docker-compose down
 ## Test Markers
 
 Tests are marked with database-specific markers for selective execution:
+
+```bash
+# Run only ChromaDB tests
+pytest tests_e2e/ -m chromadb
+
+# Run only Qdrant tests
+pytest tests_e2e/ -m qdrant
+
+# Run all integration tests
+pytest tests_e2e/ -m integration
+```
+
+## Environment Variables
+
+For cloud-hosted databases, set these environment variables:
+
+```bash
+# Pinecone
+export PINECONE_API_KEY=your-api-key
+
+# MongoDB Atlas
+export MONGODB_URI=mongodb+srv://...
+
+# Weaviate Cloud
+export WEAVIATE_URL=https://your-cluster.weaviate.cloud
+export WEAVIATE_API_KEY=your-api-key
+
+# OpenAI (for text2vec-openai in Weaviate)
+export OPENAI_API_KEY=your-openai-key
+```
+
+## Test Structure
+
+Each test file follows this pattern:
+
+```python
+class TestDatabaseE2E:
+    def test_full_workflow(self):
+        """Tests: create, add, query, delete"""
+        pass
+
+    def test_error_handling(self):
+        """Tests: error capture in spans"""
+        pass
+
+    def test_batch_operations(self):
+        """Tests: batch insert/query"""
+        pass
+
+    def test_filtered_search(self):
+        """Tests: search with metadata filters"""
+        pass
+```
+
+## Span Verification
+
+Tests verify that:
+
+1. Spans are created for each operation
+2. Span names follow the pattern: `{db.system} {operation}`
+3. Required attributes are set:
+   - `db.system` - Database identifier
+   - `db.operation.name` - Operation type
+   - `db.vector.query.top_k` - For search operations
+   - `db.vector.results.count` - For result sets
+   - `db.vector.upsert.count` - For insert operations
+
+## Troubleshooting
+
+### Docker Issues
+
+```bash
+# Check container status
+docker-compose ps
+
+# View logs
+docker-compose logs milvus
+docker-compose logs qdrant
+
+# Restart a specific service
+docker-compose restart milvus
+```
+
+### Test Failures
+
+1. **Connection refused**: Database not started or not ready yet
+2. **Import errors**: Install the client library (`pip install qdrant-client`)
+3. **Authentication errors**: Check API keys for cloud services
+
+### Cleanup
+
+```bash
+# Remove all containers and volumes
+docker-compose down -v
+```
