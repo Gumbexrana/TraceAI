@@ -58,3 +58,94 @@ def basic_chat_example():
         temperature=0.7,
     )
 
+    print("Basic Chat Response:")
+    print(response.choices[0].message.content)
+    print()
+    return response
+
+
+def streaming_chat_example():
+    """Streaming chat completion example."""
+    client = together.Together()
+
+    print("Streaming Chat Response:")
+    stream = client.chat.completions.create(
+        model="meta-llama/Llama-3-8b-chat-hf",
+        messages=[
+            {"role": "user", "content": "Count from 1 to 5, explaining each number."},
+        ],
+        max_tokens=200,
+        stream=True,
+    )
+
+    for chunk in stream:
+        if chunk.choices[0].delta.content:
+            print(chunk.choices[0].delta.content, end="", flush=True)
+
+    print("\n")
+
+
+def embeddings_example():
+    """Embeddings example."""
+    client = together.Together()
+
+    response = client.embeddings.create(
+        model="togethercomputer/m2-bert-80M-8k-retrieval",
+        input=["Hello, world!", "Machine learning is fascinating."],
+    )
+
+    print("Embeddings Response:")
+    print(f"Number of embeddings: {len(response.data)}")
+    print(f"Embedding dimensions: {len(response.data[0].embedding)}")
+    print()
+    return response
+
+
+def completions_example():
+    """Text completions example."""
+    client = together.Together()
+
+    response = client.completions.create(
+        model="meta-llama/Llama-3-8b-hf",
+        prompt="The future of artificial intelligence is",
+        max_tokens=50,
+        temperature=0.7,
+    )
+
+    print("Completions Response:")
+    print(response.choices[0].text)
+    print()
+    return response
+
+
+if __name__ == "__main__":
+    # Run examples with context attributes for better tracing
+    with using_attributes(
+        session_id="together-demo-session",
+        user_id="demo-user",
+        metadata={
+            "example_type": "basic_demo",
+            "sdk_version": "1.0",
+        },
+        tags=["demo", "together-ai"],
+    ):
+        print("=" * 60)
+        print("Together AI Instrumentation Demo")
+        print("=" * 60)
+        print()
+
+        # Basic chat
+        basic_chat_example()
+
+        # Streaming chat
+        streaming_chat_example()
+
+        # Embeddings
+        embeddings_example()
+
+        # Completions
+        completions_example()
+
+        print("=" * 60)
+        print("Demo completed! Check your tracing dashboard for spans.")
+        print("=" * 60)
