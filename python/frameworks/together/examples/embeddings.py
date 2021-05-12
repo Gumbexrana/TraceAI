@@ -36,3 +36,62 @@ def main():
     embedding = response.data[0].embedding
     print(f"Embedding dimensions: {len(embedding)}")
     print(f"First 5 values: {embedding[:5]}")
+
+    # Batch embeddings
+    print("\n=== Batch Embeddings ===")
+    documents = [
+        "Python is a versatile programming language.",
+        "Machine learning automates data analysis.",
+        "Deep learning uses neural networks.",
+        "Natural language processing understands text.",
+    ]
+
+    doc_response = client.embeddings.create(
+        model="togethercomputer/m2-bert-80M-8k-retrieval",
+        input=documents,
+    )
+    print(f"Embedded {len(documents)} documents")
+    print(f"Total tokens used: {doc_response.usage.total_tokens}")
+
+    # Semantic search
+    print("\n=== Semantic Search ===")
+    query = "How do neural networks work?"
+    query_response = client.embeddings.create(
+        model="togethercomputer/m2-bert-80M-8k-retrieval",
+        input=query,
+    )
+    query_embedding = query_response.data[0].embedding
+
+    print(f"Query: {query}")
+    print("Results:")
+    similarities = []
+    for i, doc_data in enumerate(doc_response.data):
+        similarity = cosine_similarity(query_embedding, doc_data.embedding)
+        similarities.append((similarity, documents[i]))
+
+    similarities.sort(reverse=True)
+    for sim, doc in similarities:
+        print(f"  {sim:.4f}: {doc}")
+
+    # RAG-style usage
+    print("\n=== RAG Context Building ===")
+    top_docs = [doc for _, doc in similarities[:2]]
+    context = "\n".join(top_docs)
+
+    # Generate answer with context
+    chat_response = client.chat.completions.create(
+        model="meta-llama/Llama-3-8b-chat-hf",
+        messages=[
+            {
+                "role": "system",
+                "content": f"Answer based on this context:\n{context}",
+            },
+            {"role": "user", "content": query},
+        ],
+        max_tokens=200,
+    )
+    print(f"Answer: {chat_response.choices[0].message.content}")
+
+
+if __name__ == "__main__":
+    main()
