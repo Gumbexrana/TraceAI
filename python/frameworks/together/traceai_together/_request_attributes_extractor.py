@@ -123,3 +123,57 @@ class _CompletionsRequestAttributesExtractor:
         if prompt:
             if isinstance(prompt, str):
                 yield SpanAttributes.INPUT_VALUE, prompt
+                yield f"{SpanAttributes.GEN_AI_INPUT_MESSAGES}.0.{MessageAttributes.MESSAGE_ROLE}", "user"
+                yield f"{SpanAttributes.GEN_AI_INPUT_MESSAGES}.0.{MessageAttributes.MESSAGE_CONTENT}", prompt
+            elif isinstance(prompt, list):
+                yield SpanAttributes.INPUT_VALUE, safe_json_dumps(prompt)
+                for i, p in enumerate(prompt):
+                    yield f"{SpanAttributes.GEN_AI_INPUT_MESSAGES}.{i}.{MessageAttributes.MESSAGE_ROLE}", "user"
+                    yield f"{SpanAttributes.GEN_AI_INPUT_MESSAGES}.{i}.{MessageAttributes.MESSAGE_CONTENT}", str(p)
+
+    def _extract_invocation_parameters(
+        self, request_parameters: Mapping[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract model invocation parameters."""
+        params = {}
+        param_keys = [
+            "temperature", "max_tokens", "top_p", "top_k", "stop",
+            "frequency_penalty", "presence_penalty", "repetition_penalty",
+            "logprobs", "echo", "n", "stream", "suffix"
+        ]
+        for key in param_keys:
+            if key in request_parameters:
+                params[key] = request_parameters[key]
+        return params
+
+
+class _EmbeddingsRequestAttributesExtractor:
+    """Extract span attributes from Together AI embeddings request."""
+
+    def get_attributes_from_request(
+        self, request_parameters: Mapping[str, Any]
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        """Extract primary attributes from request."""
+        yield SpanAttributes.GEN_AI_SPAN_KIND, FiSpanKindValues.EMBEDDING.value
+        yield SpanAttributes.GEN_AI_PROVIDER_NAME, "together"
+        yield SpanAttributes.GEN_AI_PROVIDER_NAME, "together"
+
+        model = request_parameters.get("model", "")
+        if model:
+            yield SpanAttributes.EMBEDDING_MODEL_NAME, model
+
+        yield SpanAttributes.INPUT_MIME_TYPE, FiMimeTypeValues.JSON.value
+        yield SpanAttributes.OUTPUT_MIME_TYPE, FiMimeTypeValues.JSON.value
+
+    def get_extra_attributes_from_request(
+        self, request_parameters: Mapping[str, Any]
+    ) -> Iterator[Tuple[str, AttributeValue]]:
+        """Extract extra attributes."""
+        input_text = request_parameters.get("input", "")
+        if input_text:
+            if isinstance(input_text, str):
+                yield SpanAttributes.INPUT_VALUE, input_text
+                yield "together.texts_count", 1
+            elif isinstance(input_text, list):
+                yield SpanAttributes.INPUT_VALUE, safe_json_dumps(input_text[:5])  # Limit for display
+                yield "together.texts_count", len(input_text)
