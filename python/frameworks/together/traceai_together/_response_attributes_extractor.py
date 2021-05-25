@@ -250,3 +250,112 @@ class _StreamingChatResponseAccumulator:
                     if idx not in self._tool_calls:
                         self._tool_calls[idx] = {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
 
+                    if "id" in tc and tc["id"]:
+                        self._tool_calls[idx]["id"] = tc["id"]
+                    if "type" in tc:
+                        self._tool_calls[idx]["type"] = tc["type"]
+                    if "function" in tc:
+                        func = tc["function"]
+                        if "name" in func and func["name"]:
+                            self._tool_calls[idx]["function"]["name"] += func["name"]
+                        if "arguments" in func and func["arguments"]:
+                            self._tool_calls[idx]["function"]["arguments"] += func["arguments"]
+
+            # Capture finish reason
+            if "finish_reason" in choice and choice["finish_reason"]:
+                self._finish_reason = choice["finish_reason"]
+
+    def get_accumulated_response(self) -> Dict[str, Any]:
+        """Get the accumulated response as a dict."""
+        content = "".join(self._content_parts)
+
+        message: Dict[str, Any] = {
+            "role": "assistant",
+            "content": content,
+        }
+
+        if self._tool_calls:
+            message["tool_calls"] = [self._tool_calls[i] for i in sorted(self._tool_calls.keys())]
+
+        response = {
+            "model": self._model,
+            "choices": [{
+                "message": message,
+                "finish_reason": self._finish_reason,
+            }],
+            "usage": self._usage,
+        }
+
+        return response
+
+    def get_content(self) -> str:
+        """Get accumulated content."""
+        return "".join(self._content_parts)
+
+    def get_raw_chunks(self) -> List[Dict[str, Any]]:
+        """Get raw chunks (limited)."""
+        return self._raw_chunks[-5:]  # Last 5 chunks
+
+
+class _StreamingCompletionsResponseAccumulator:
+    """Accumulates streaming completions response chunks."""
+
+    def __init__(self) -> None:
+        self._text_parts: List[str] = []
+        self._model: Optional[str] = None
+        self._finish_reason: Optional[str] = None
+        self._usage: Dict[str, int] = {}
+        self._raw_chunks: List[Dict[str, Any]] = []
+
+    def process_chunk(self, chunk: Any) -> None:
+        """Process a streaming chunk."""
+        chunk_dict = {}
+        if hasattr(chunk, "model_dump"):
+            chunk_dict = chunk.model_dump()
+        elif hasattr(chunk, "dict"):
+            chunk_dict = chunk.dict()
+        elif hasattr(chunk, "to_dict"):
+            chunk_dict = chunk.to_dict()
+        elif isinstance(chunk, dict):
+            chunk_dict = chunk
+
+        self._raw_chunks.append(chunk_dict)
+
+        if "model" in chunk_dict:
+            self._model = chunk_dict["model"]
+
+        if "usage" in chunk_dict and chunk_dict["usage"]:
+            self._usage = chunk_dict["usage"]
+
+        choices = chunk_dict.get("choices", [])
+        for choice in choices:
+            # For completions, text is directly in choice
+            if "text" in choice and choice["text"]:
+                self._text_parts.append(choice["text"])
+
+            # Capture finish reason
+            if "finish_reason" in choice and choice["finish_reason"]:
+                self._finish_reason = choice["finish_reason"]
+
+    def get_accumulated_response(self) -> Dict[str, Any]:
+        """Get the accumulated response as a dict."""
+        text = "".join(self._text_parts)
+
+        response = {
+            "model": self._model,
+            "choices": [{
+                "text": text,
+                "finish_reason": self._finish_reason,
+            }],
+            "usage": self._usage,
+        }
+
+        return response
+
+    def get_text(self) -> str:
+        """Get accumulated text."""
+        return "".join(self._text_parts)
+
+    def get_raw_chunks(self) -> List[Dict[str, Any]]:
+        """Get raw chunks (limited)."""
+        return self._raw_chunks[-5:]  # Last 5 chunks
