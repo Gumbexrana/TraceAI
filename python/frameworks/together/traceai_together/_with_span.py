@@ -64,3 +64,32 @@ class _WithSpan:
         status: Optional[trace_api.Status] = None,
         attributes: Attributes = None,
         extra_attributes: Attributes = None,
+    ) -> None:
+        """Finish the span with optional status and attributes."""
+        if self._is_finished:
+            return
+        for mapping in (
+            attributes,
+            self._context_attributes,
+            self._extra_attributes,
+            extra_attributes,
+        ):
+            if not mapping:
+                continue
+            for key, value in mapping.items():
+                if value is None:
+                    continue
+                try:
+                    self._span.set_attribute(key, value)
+                except Exception:
+                    logger.exception("Failed to set attribute on span")
+        if status is not None:
+            try:
+                self._span.set_status(status=status)
+            except Exception:
+                logger.exception("Failed to set status code on span")
+        try:
+            self._span.end()
+        except Exception:
+            logger.exception("Failed to end span")
+        self._is_finished = True
