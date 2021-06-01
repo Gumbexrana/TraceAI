@@ -154,3 +154,71 @@ class TogetherInstrumentor(BaseInstrumentor):
                     wrap_function_wrapper(
                         module="together.resources.embeddings",
                         name="AsyncEmbeddings.create",
+                        wrapper=_AsyncEmbeddingsWrapper(tracer=self._tracer),
+                    )
+                except (ImportError, AttributeError) as e:
+                    logger.debug(f"Could not wrap async embeddings.create: {e}")
+
+        except Exception as e:
+            logger.exception(f"Error wrapping async Together client: {e}")
+
+        # Wrap Protect if available
+        if Protect is not None:
+            self._original_protect = Protect.protect
+            wrap_function_wrapper(
+                module="fi.evals",
+                name="Protect.protect",
+                wrapper=GuardrailProtectWrapper(tracer=self._tracer),
+            )
+        else:
+            self._original_protect = None
+
+    def _uninstrument(self, **kwargs: Any) -> None:
+        """Remove instrumentation from Together AI client."""
+        try:
+            # Restore sync methods
+            try:
+                from together.resources.chat import ChatCompletions
+                if hasattr(self, "_original_chat_completions_create"):
+                    ChatCompletions.create = self._original_chat_completions_create
+            except (ImportError, AttributeError):
+                pass
+
+            try:
+                from together.resources.completions import Completions
+                if hasattr(self, "_original_completions_create"):
+                    Completions.create = self._original_completions_create
+            except (ImportError, AttributeError):
+                pass
+
+            try:
+                from together.resources.embeddings import Embeddings
+                if hasattr(self, "_original_embeddings_create"):
+                    Embeddings.create = self._original_embeddings_create
+            except (ImportError, AttributeError):
+                pass
+
+            # Restore async methods
+            try:
+                from together.resources.chat import AsyncChatCompletions
+                if hasattr(self, "_original_async_chat_completions_create"):
+                    AsyncChatCompletions.create = self._original_async_chat_completions_create
+            except (ImportError, AttributeError):
+                pass
+
+            try:
+                from together.resources.completions import AsyncCompletions
+                if hasattr(self, "_original_async_completions_create"):
+                    AsyncCompletions.create = self._original_async_completions_create
+            except (ImportError, AttributeError):
+                pass
+
+            try:
+                from together.resources.embeddings import AsyncEmbeddings
+                if hasattr(self, "_original_async_embeddings_create"):
+                    AsyncEmbeddings.create = self._original_async_embeddings_create
+            except (ImportError, AttributeError):
+                pass
+
+        except Exception as e:
+            logger.exception(f"Error uninstrumenting Together client: {e}")
