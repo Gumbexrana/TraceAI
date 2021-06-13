@@ -35,3 +35,20 @@ trace_provider = register(
     project_version_name="v1",
 )
 
+# Initialize the VertexAI instrumentor
+VertexAIInstrumentor().instrument(tracer_provider=trace_provider)
+
+vertexai.init(
+    project=os.getenv("GOOGLE_CLOUD_PROJECT"),
+)
+model = GenerativeModel("gemini-1.5-flash")
+prompt = """Can you transcribe this interview, in the format of timecode, speaker, caption.
+Use speaker A, speaker B, etc. to identify speakers.
+"""
+audio_file_uri = "gs://cloud-samples-data/generative-ai/audio/pixel.mp3"
+audio_file = Part.from_uri(audio_file_uri, mime_type="audio/mpeg")
+contents = [audio_file, prompt]
+
+if __name__ == "__main__":
+    response = model.generate_content(contents)
+    print(response)
