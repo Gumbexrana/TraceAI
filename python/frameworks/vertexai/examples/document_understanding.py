@@ -35,3 +35,20 @@ trace_provider = register(
     project_version_name="v1",
 )
 
+# Initialize the VertexAI instrumentor
+VertexAIInstrumentor().instrument(tracer_provider=trace_provider)
+
+vertexai.init(
+    project=os.getenv("GOOGLE_CLOUD_PROJECT"),
+)
+model = GenerativeModel("gemini-1.5-flash")
+prompt = """You are a very professional document summarization specialist.
+Please summarize the given document.
+"""
+pdf_file_uri = "gs://cloud-samples-data/generative-ai/pdf/2403.05530.pdf"
+pdf_file = Part.from_uri(pdf_file_uri, mime_type="application/pdf")
+contents = [pdf_file, prompt]
+
+if __name__ == "__main__":
+    response = model.generate_content(contents)
+    print(response)
