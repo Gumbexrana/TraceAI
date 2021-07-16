@@ -26,3 +26,15 @@ def get_text_embedding(text, title=None, task_type=None, output_dimensionality=N
 
     kwargs = {}
     if output_dimensionality:
+        kwargs["output_dimensionality"] = output_dimensionality
+
+    embeddings = model.get_embeddings([text_embedding_input], **kwargs)
+    return [embedding.values for embedding in embeddings]
+
+
+# Example usage:
+if __name__ == "__main__":
+    sample_text = "Your text here"
+    vectors = get_text_embedding(sample_text)
+    for vector in vectors:
+        print(vector)
