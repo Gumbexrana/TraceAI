@@ -34,3 +34,19 @@ trace_provider = register(
     project_name="FUTURE_AGI",
     project_version_name="v1",
 )
+
+# Initialize the VertexAI instrumentor
+VertexAIInstrumentor().instrument(tracer_provider=trace_provider)
+
+vertexai.init(
+    project=os.getenv("GOOGLE_CLOUD_PROJECT"),
+)
+model = GenerativeModel("gemini-1.5-flash")
+
+if __name__ == "__main__":
+    image_part = Part.from_uri(
+        "https://fi-customer-data-dev.s3.ap-south-1.amazonaws.com/tempcust/002968fd-8b13-40e1-b936-ab65a20da091",
+        mime_type="image/jpeg",
+    )
+    response = model.generate_content(["Describe this image", image_part])
+    print(response)
