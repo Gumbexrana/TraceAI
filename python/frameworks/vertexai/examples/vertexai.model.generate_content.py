@@ -18,3 +18,35 @@ eval_tags = [
         eval_name=EvalName.DETERMINISTIC_EVALS,
         value=EvalSpanKind.TOOL,
         type=EvalTagType.OBSERVATION_SPAN,
+        config={
+            "multi_choice": False,
+            "choices": ["Yes", "No"],
+            "rule_prompt": "Evaluate if the response is correct",
+        },
+        custom_eval_name="<custom_eval_name>",
+    )
+]
+
+# Configure trace provider with custom evaluation tags
+trace_provider = register(
+    project_type=ProjectType.EXPERIMENT,
+    eval_tags=eval_tags,
+    project_name="FUTURE_AGI",
+    project_version_name="v1",
+)
+
+# Initialize the VertexAI instrumentor
+VertexAIInstrumentor().instrument(tracer_provider=trace_provider)
+
+vertexai.init(
+    project=os.getenv("GOOGLE_CLOUD_PROJECT"),
+)
+model = GenerativeModel("gemini-1.5-flash")
+
+
+if __name__ == "__main__":
+    response = model.generate_content(
+        "Write a haiku.",
+        generation_config={"max_output_tokens": 20},
+    )
+    print(response)
