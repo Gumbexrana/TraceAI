@@ -77,3 +77,37 @@ class _StringAccumulator:
     __slots__ = ("_fragments",)
 
     def __init__(self) -> None:
+        self._fragments: List[str] = []
+
+    def __str__(self) -> str:
+        return "".join(self._fragments)
+
+    def __iadd__(self, value: Optional[str]) -> "_StringAccumulator":
+        if not value:
+            return self
+        self._fragments.append(value)
+        return self
+
+
+class _IndexedAccumulator:
+    __slots__ = ("_indexed",)
+
+    def __init__(self, kv_factory: Callable[[], _KeyValuesAccumulator]) -> None:
+        self._indexed: DefaultDict[int, _KeyValuesAccumulator] = defaultdict(kv_factory)
+
+    def __iter__(self) -> Iterator[Dict[str, Any]]:
+        for _, values in sorted(self._indexed.items()):
+            yield dict(values)
+
+    def __iadd__(
+        self,
+        values: Optional[Union[Mapping[str, Any], Iterable[Mapping[str, Any]]]],
+    ) -> "_IndexedAccumulator":
+        if not values:
+            return self
+        if isinstance(values, Mapping):
+            values = [values]
+        for v in values:
+            if v and hasattr(v, "get"):
+                self._indexed[v.get("index") or 0] += v
+        return self
