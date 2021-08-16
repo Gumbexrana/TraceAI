@@ -210,3 +210,94 @@ class _AsyncGenerator(
     Generic[_YieldT_co, _SendT_contra],
 ):
     def __init__(
+        self,
+        wrapped: AsyncGenerator[_YieldT_co, _SendT_contra],
+        callback: Optional[_CallbackT[_AnyT]] = None,
+        context_manager_factory: Optional[Callable[[], ContextManager[Any]]] = None,
+    ) -> None:
+        super().__init__(wrapped, callback, context_manager_factory)
+
+    def asend(self, v: _SendT_contra) -> Awaitable[_YieldT_co]:
+        ans = cast(Awaitable[_YieldT_co], _call(self, v))
+        return _Awaitable(
+            wrapped=ans,
+            callback=self._self_callback,
+            context_manager_factory=self._self_context_manager_factory,
+        )
+
+    def athrow(self, *args: Any, **kwargs: Any) -> Awaitable[_YieldT_co]:
+        ans = cast(Awaitable[_YieldT_co], _call(self, *args, **kwargs))
+        return _Awaitable(
+            wrapped=ans,
+            callback=self._self_callback,
+            context_manager_factory=self._self_context_manager_factory,
+        )
+
+
+class _NoErr(wrapt.ObjectProxy):  # type: ignore[misc]
+    def __init__(self, wrapped: Any) -> None:
+        super().__init__(wrapped)
+        setattr(self, _SELF_IS_NO_ERR, True)
+        self._self_is_entered = False
+
+    def __enter__(self) -> Any:
+        if (
+            not (cm := self.__wrapped__)
+            or not isinstance(cm, ContextManager)
+            or self._self_is_entered
+        ):
+            return
+        try:
+            return cm.__enter__()
+        except BaseException as exc:
+            logger.exception(exc)
+        finally:
+            self._self_is_entered = True
+
+    def __exit__(self, *args: Any, **kwargs: Any) -> Any:
+        if (
+            not (cm := self.__wrapped__)
+            or not isinstance(cm, ContextManager)
+            or not self._self_is_entered
+        ):
+            return
+        try:
+            return cm.__exit__(*args, **kwargs)
+        except BaseException as exc:
+            logger.exception(exc)
+        finally:
+            self._self_is_entered = False
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        ans = args[0] if args else (next(iter(kwargs.values())) if kwargs else None)
+        if (fn := self.__wrapped__) and callable(fn):
+            try:
+                ans = fn(*args, **kwargs)
+            except BaseException as exc:
+                logger.exception(exc)
+        return ans
+
+
+def _no_err(obj: Optional[_T_co]) -> _T_co:
+    if getattr(obj, _SELF_IS_NO_ERR, False):
+        return cast(_T_co, obj)
+    return _NoErr(obj)
+
+
+def _call(self: _Proxy, *args: Any, **kwargs: Any) -> Any:
+    name = inspect.stack()[1].function
+    fn = getattr(self.__wrapped__, name)
+    callback = self._self_callback
+    context_manager = _no_err(self._self_context_manager_factory())
+    try:
+        with context_manager:
+            ans = fn(*args, **kwargs)
+    except BaseException as exc:
+        callback(exc)  # type: ignore[arg-type]
+        raise
+    return callback(ans)
+
+
+_SUFFIX = f"_{getrandbits(64).to_bytes(8, 'big').hex()}"
+_SELF_IS_NO_ERR = f"_self_is_no_err{_SUFFIX}"
+_SELF_IS_PROXY = f"_self_is_proxy{_SUFFIX}"
