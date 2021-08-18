@@ -513,3 +513,224 @@ def _parse_content(
         Iterator: semantic convention key-value pairs for span attributes.
     """
     yield f"{prefix}{MESSAGE_ROLE}", role_override or _role(content.role)
+    parts = cast(Iterable[Part], content.parts)
+    for part in parts:
+        if part.function_response.name:
+            # FIXME: It's unclear whether multiple `function_response` can
+            # coexist, but currently we can retain only one.
+            yield f"{prefix}{MESSAGE_ROLE}", "tool"
+            yield f"{prefix}{MESSAGE_NAME}", part.function_response.name
+            cls = part.function_response.__class__
+            # Maybe there's an easier way to do this.
+            function_response = cls.to_dict(part.function_response)
+            yield (
+                f"{prefix}{MESSAGE_CONTENT}",
+                safe_json_dumps(function_response.get("response") or {}),
+            )
+    yield from _parse_parts(parts, prefix)
+    yield from _parse_tool_calls(parts, prefix)
+
+
+@stop_on_exception
+def _parse_tool_calls(
+    parts: Iterable[Part],
+    prefix: str = "",
+) -> Iterator[Tuple[str, AttributeValue]]:
+    """
+    Extract semantic convention span attributes as key-value pairs.
+
+    Args:
+        parts: an iterable of the `Part` proto.Message
+        prefix: optional prefix for the keys, useful when flattening a list,
+            e.g. "llm.input_messages.0.", "llm.input_messages.1.", etc.
+
+    Returns:
+        Iterator: semantic convention key-value pairs for span attributes.
+    """
+    idx = -1
+    for part in parts:
+        if part.function_call.name:
+            idx += 1
+            inner_prefix = f"{prefix}{MESSAGE_TOOL_CALLS}.{idx}."
+            yield f"{inner_prefix}{TOOL_CALL_FUNCTION_NAME}", part.function_call.name
+            cls = part.function_call.__class__
+            # Maybe there's an easier way to do this.
+            function_call = cls.to_dict(part.function_call)
+            yield (
+                f"{inner_prefix}{TOOL_CALL_FUNCTION_ARGUMENTS_JSON}",
+                safe_json_dumps(function_call.get("args") or {}),
+            )
+
+
+@stop_on_exception
+def _parse_parts(
+    parts: Iterable[Part],
+    prefix: str = "",
+) -> Iterator[Tuple[str, AttributeValue]]:
+    """
+    Extract semantic convention span attributes as key-value pairs.
+
+    Args:
+        parts: an iterable of the `Part` proto.Message
+        prefix: optional prefix for the keys, useful when flattening a list,
+            e.g. "llm.input_messages.0.", "llm.input_messages.1.", etc.
+
+    Returns:
+        Iterator: semantic convention key-value pairs for span attributes.
+    """
+    for j, part in enumerate(parts):
+        inner_prefix = f"{prefix}{MESSAGE_CONTENTS}.{j}."
+        for k, v in _parse_part(part, inner_prefix):
+            yield k, v
+
+
+@stop_on_exception
+def _parse_part(
+    part: Part,
+    prefix: str = "",
+) -> Iterator[Tuple[str, AttributeValue]]:
+    """
+    Extract semantic convention span attributes as key-value pairs.
+
+    Args:
+        part: a `Part` proto.Message
+        prefix: optional prefix for the keys, useful when flattening a list,
+            e.g. "llm.input_messages.0.", "llm.input_messages.1.", etc.
+
+    Returns:
+        Iterator: semantic convention key-value pairs for span attributes.
+    """
+    if part.text:
+        yield f"{prefix}{MESSAGE_CONTENT_TYPE}", "text"
+        yield f"{prefix}{MESSAGE_CONTENT_TEXT}", part.text
+    elif part.inline_data.mime_type.startswith("image"):
+        yield f"{prefix}{MESSAGE_CONTENT_TYPE}", "image"
+        yield (
+            f"{prefix}{MESSAGE_CONTENT_IMAGE}",
+            f"data:{part.inline_data.mime_type};"
+            f"base64,{base64.b64encode(part.inline_data.data).decode()}",
+        )
+    elif part.file_data.mime_type.startswith("image"):
+        yield f"{prefix}{MESSAGE_CONTENT_TYPE}", "image"
+        yield f"{prefix}{MESSAGE_CONTENT_IMAGE}", part.file_data.file_uri
+    elif part.file_data.mime_type.startswith("audio"):
+        yield f"{prefix}{MESSAGE_CONTENT_TYPE}", "audio"
+        yield f"{prefix}{MESSAGE_CONTENT_AUDIO}", part.file_data.file_uri
+    elif part.file_data.mime_type.startswith("video"):
+        yield f"{prefix}{MESSAGE_CONTENT_TYPE}", "video"
+        yield f"{prefix}{MESSAGE_CONTENT_VIDEO}", part.file_data.file_uri
+
+
+def _parse_predictions(predictions: List[Any]) -> Iterator[Tuple[str, AttributeValue]]:
+    for index, prediction in enumerate(predictions):
+        if prediction.get("mimeType", "").startswith("image"):
+            if image := prediction.get("bytesBase64Encoded"):
+                yield f"{GEN_AI_OUTPUT_MESSAGES}.{index}.{MESSAGE_CONTENT}.0.{MESSAGE_CONTENT_TYPE}", "image"
+                yield f"{GEN_AI_OUTPUT_MESSAGES}.{index}.{MESSAGE_CONTENT}.0.{MESSAGE_CONTENT_IMAGE}", image
+                yield f"{GEN_AI_OUTPUT_MESSAGES}.{index}.{MESSAGE_ROLE}", "assistant"
+
+
+def _role(role: str) -> str:
+    if role == "model":
+        return "assistant"
+    return role
+
+
+def _extract_image_data(messages):
+    try:
+        input_images = []
+        filtered_messages = []
+        eval_input = []
+        query = ""
+
+        if isinstance(messages, list):
+            for message in messages:
+                filtered_parts = []
+                content = message.get("parts", [])
+
+                # Handle both string and list content
+                if isinstance(content, str):
+                    filtered_messages.append(message)
+                    eval_input.append(content)
+                    continue
+
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict):
+                            if "text" in item:
+                                filtered_parts.append(item)
+                                if item.get("text"):
+                                    eval_input.append(str(item.get("text")))
+                            if "file_data" in item:
+                                if (
+                                    item.get("file_data", {}).get("mime_type")
+                                    == "image/jpeg"
+                                ):
+                                    input_images.append(
+                                        item.get("file_data", {}).get("file_uri")
+                                    )
+
+                # Create new message with only parts
+                if filtered_parts:
+                    filtered_message = {
+                        "role": message.get("role"),
+                        "parts": filtered_parts,
+                    }
+                    filtered_messages.append(filtered_message)
+
+        if eval_input and len(eval_input) > 0:
+            query = eval_input[0]
+
+        return {
+            "input_images": input_images if input_images else None,
+            "filtered_messages": filtered_messages if filtered_messages else None,
+            "eval_input": " | ".join(eval_input),
+            "query": query,
+        }
+    except Exception as e:
+        print(f"Error in _extract_image_data: {e}")
+        return {
+            "input_images": input_images,
+            "filtered_messages": messages,
+            "eval_input": "",
+            "query": query,
+        }
+
+
+IMAGE_URL = ImageAttributes.IMAGE_URL
+INPUT_MIME_TYPE = SpanAttributes.INPUT_MIME_TYPE
+INPUT_VALUE = SpanAttributes.INPUT_VALUE
+INPUT_IMAGES = SpanAttributes.INPUT_IMAGES
+OUTPUT_VALUE = SpanAttributes.OUTPUT_VALUE
+JSON = FiMimeTypeValues.JSON.value
+LLM = FiSpanKindValues.LLM.value
+EMBEDDING = FiSpanKindValues.EMBEDDING.value
+GEN_AI_PROVIDER_NAME = SpanAttributes.GEN_AI_PROVIDER_NAME
+VERTEXAI = FiLLMProviderValues.VERTEXAI.value
+GEN_AI_INPUT_MESSAGES = SpanAttributes.GEN_AI_INPUT_MESSAGES
+GEN_AI_REQUEST_PARAMETERS = SpanAttributes.GEN_AI_REQUEST_PARAMETERS
+GEN_AI_REQUEST_MODEL = SpanAttributes.GEN_AI_REQUEST_MODEL
+GEN_AI_OUTPUT_MESSAGES = SpanAttributes.GEN_AI_OUTPUT_MESSAGES
+GEN_AI_USAGE_OUTPUT_TOKENS = SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS
+GEN_AI_USAGE_INPUT_TOKENS = SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS
+GEN_AI_USAGE_TOTAL_TOKENS = SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS
+MESSAGE_CONTENT = MessageAttributes.MESSAGE_CONTENT
+MESSAGE_CONTENTS = MessageAttributes.MESSAGE_CONTENTS
+MESSAGE_CONTENT_IMAGE = MessageContentAttributes.MESSAGE_CONTENT_IMAGE
+MESSAGE_CONTENT_TEXT = MessageContentAttributes.MESSAGE_CONTENT_TEXT
+MESSAGE_CONTENT_TYPE = MessageContentAttributes.MESSAGE_CONTENT_TYPE
+MESSAGE_CONTENT_AUDIO = MessageContentAttributes.MESSAGE_CONTENT_AUDIO
+MESSAGE_CONTENT_VIDEO = MessageContentAttributes.MESSAGE_CONTENT_VIDEO
+MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON = (
+    MessageAttributes.MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON
+)
+MESSAGE_FUNCTION_CALL_NAME = MessageAttributes.MESSAGE_FUNCTION_CALL_NAME
+MESSAGE_NAME = MessageAttributes.MESSAGE_NAME
+MESSAGE_ROLE = MessageAttributes.MESSAGE_ROLE
+MESSAGE_TOOL_CALLS = MessageAttributes.MESSAGE_TOOL_CALLS
+GEN_AI_SPAN_KIND = SpanAttributes.GEN_AI_SPAN_KIND
+OUTPUT_MIME_TYPE = SpanAttributes.OUTPUT_MIME_TYPE
+TOOL_CALL_FUNCTION_ARGUMENTS_JSON = ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON
+TOOL_CALL_FUNCTION_NAME = ToolCallAttributes.TOOL_CALL_FUNCTION_NAME
+EMBEDDING_EMBEDDINGS = SpanAttributes.EMBEDDING_EMBEDDINGS
+EMBEDDING_VECTOR = EmbeddingAttributes.EMBEDDING_VECTOR
