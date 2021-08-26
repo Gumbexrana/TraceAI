@@ -47,3 +47,25 @@ class VertexAIInstrumentor(BaseInstrumentor):  # type: ignore
         from traceai_vertexai._wrapper import _Wrapper
 
         for method in (gapic.method.wrap_method, gapic.method_async.wrap_method):
+            wrap_function_wrapper(
+                module=method.__module__,
+                name=method.__name__,
+                wrapper=lambda f, _, args, kwargs: _Wrapper(tracer)(f(*args, **kwargs)),
+            )
+        if Protect is not None:
+            self._original_protect = Protect.protect
+            wrap_function_wrapper(
+                module="fi.evals",
+                name="Protect.protect",
+                wrapper=GuardrailProtectWrapper(tracer),
+            )
+        else:
+            self._original_protect = None
+
+    def _uninstrument(self, **kwargs: Any) -> None:
+        self._status._IS_INSTRUMENTED = False
+        import google.api_core.gapic_v1 as gapic
+
+        for module in (gapic.method, gapic.method_async):
+            if wrapped := getattr(module.wrap_method, "__wrapped__", None):
+                setattr(module, "wrap_method", wrapped)
