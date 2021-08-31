@@ -75,3 +75,37 @@ VLLMInstrumentor(
 - `gen_ai.usage.output_tokens` - Output token count
 - `gen_ai.prompt.{n}.role` - Message roles
 - `gen_ai.prompt.{n}.content` - Message contents
+- `gen_ai.completion.{n}.content` - Response content
+
+## vLLM-Specific Parameters
+
+The instrumentation also captures vLLM-specific parameters when provided:
+
+- `best_of` - Number of output sequences to generate
+- `use_beam_search` - Whether to use beam search
+
+## Requirements
+
+- Python >= 3.9
+- openai >= 1.0.0
+- fi-instrumentation >= 0.1.0
+- opentelemetry-api >= 1.0.0
+- opentelemetry-sdk >= 1.0.0
+
+## Running vLLM Server
+
+To use this instrumentation, you need a running vLLM server:
+
+```bash
+# Install vLLM
+pip install vllm
+
+# Start the server
+python -m vllm.entrypoints.openai.api_server \
+    --model meta-llama/Llama-2-7b-chat-hf \
+    --port 8000
+```
+
+## License
+
+Apache-2.0
