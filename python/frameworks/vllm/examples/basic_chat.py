@@ -30,3 +30,18 @@ def main():
     # Make a chat completion request
     response = client.chat.completions.create(
         model="meta-llama/Llama-2-7b-chat-hf",  # Model loaded in vLLM
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "What is the capital of France?"},
+        ],
+        max_tokens=100,
+        temperature=0.7,
+    )
+
+    print("Response:", response.choices[0].message.content)
+    print("Model:", response.model)
+    print("Usage:", response.usage)
+
+
+if __name__ == "__main__":
+    main()
