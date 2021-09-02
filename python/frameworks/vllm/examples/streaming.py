@@ -34,3 +34,19 @@ def main():
         model="meta-llama/Llama-2-7b-chat-hf",  # Model loaded in vLLM
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Write a haiku about machine learning."},
+        ],
+        max_tokens=100,
+        temperature=0.8,
+        stream=True,
+    )
+
+    for chunk in stream:
+        if chunk.choices[0].delta.content:
+            print(chunk.choices[0].delta.content, end="", flush=True)
+
+    print()  # New line at end
+
+
+if __name__ == "__main__":
+    main()
