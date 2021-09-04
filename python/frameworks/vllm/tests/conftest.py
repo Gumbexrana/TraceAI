@@ -47,3 +47,24 @@ def mock_stream_chunks():
     # Last chunk has usage
     chunks[-1].usage = MagicMock()
     chunks[-1].usage.prompt_tokens = 10
+    chunks[-1].usage.completion_tokens = 7
+    chunks[-1].usage.total_tokens = 17
+    return chunks
+
+
+@pytest.fixture
+def mock_vllm_client():
+    """Create a mock client configured for vLLM."""
+    client = MagicMock()
+    client._client = MagicMock()
+    type(client._client).base_url = PropertyMock(return_value="http://localhost:8000/v1")
+    return client
+
+
+@pytest.fixture
+def mock_non_vllm_client():
+    """Create a mock client NOT configured for vLLM."""
+    client = MagicMock()
+    client._client = MagicMock()
+    type(client._client).base_url = PropertyMock(return_value="https://api.openai.com/v1")
+    return client
