@@ -109,3 +109,51 @@ class TestVLLMInstrumentor:
                     instrumentor.instrument(tracer_provider=mock_provider)
                 except ImportError:
                     pass  # Expected when openai not installed
+
+
+class TestVLLMInstrumentorIntegration:
+    """Integration tests for VLLMInstrumentor."""
+
+    @patch("opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter")
+    def test_wrapper_skips_non_vllm_client(self, mock_exporter):
+        """Should skip instrumentation for non-vLLM clients."""
+        from traceai_vllm._wrappers import _CompletionsWrapper
+
+        mock_tracer = MagicMock()
+        wrapper = _CompletionsWrapper(tracer=mock_tracer, vllm_base_urls=["localhost:8000"])
+
+        # Create non-vLLM client
+        mock_instance = MagicMock()
+        mock_instance._client = MagicMock()
+        type(mock_instance._client).base_url = PropertyMock(return_value="https://api.openai.com/v1")
+
+        wrapped_func = MagicMock(return_value="original_response")
+
+        result = wrapper(wrapped_func, mock_instance, (), {"model": "gpt-4", "messages": []})
+
+        assert result == "original_response"
+        wrapped_func.assert_called_once()
+
+    @patch("opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter")
+    def test_wrapper_instruments_vllm_client(self, mock_exporter, mock_openai_response, mock_vllm_client):
+        """Should instrument vLLM client calls."""
+        from traceai_vllm._wrappers import _CompletionsWrapper
+
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_span = MagicMock(return_value=mock_span)
+
+        wrapper = _CompletionsWrapper(tracer=mock_tracer, vllm_base_urls=["localhost:8000"])
+        wrapped_func = MagicMock(return_value=mock_openai_response)
+
+        result = wrapper(
+            wrapped_func,
+            mock_vllm_client,
+            (),
+            {"model": "meta-llama/Llama-2-7b-chat-hf", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+        assert result == mock_openai_response
+        mock_tracer.start_span.assert_called_once()
+        mock_span.set_attributes.assert_called()
+        mock_span.end.assert_called()
