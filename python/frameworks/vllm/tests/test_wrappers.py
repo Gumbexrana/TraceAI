@@ -140,3 +140,65 @@ class TestGetInputAttributes:
 
 class TestGetOutputAttributes:
     """Tests for _get_output_attributes function."""
+
+    def test_basic_response_attributes(self, mock_openai_response):
+        """Should extract basic response attributes."""
+        attrs = _get_output_attributes(mock_openai_response)
+
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_MODEL] == "meta-llama/Llama-2-7b-chat-hf"
+
+    def test_message_content(self, mock_openai_response):
+        """Should extract message content."""
+        attrs = _get_output_attributes(mock_openai_response)
+
+        assert attrs[f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.0.{MessageAttributes.MESSAGE_ROLE}"] == "assistant"
+        assert attrs[f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.0.{MessageAttributes.MESSAGE_CONTENT}"] == "Hello! How can I help you?"
+        assert attrs[SpanAttributes.OUTPUT_VALUE] == "Hello! How can I help you?"
+
+    def test_usage_metrics(self, mock_openai_response):
+        """Should extract usage metrics."""
+        attrs = _get_output_attributes(mock_openai_response)
+
+        assert attrs[SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS] == 10
+        assert attrs[SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS] == 8
+        assert attrs[SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS] == 18
+
+    def test_raw_output_included(self, mock_openai_response):
+        """Should include raw output."""
+        attrs = _get_output_attributes(mock_openai_response)
+
+        assert SpanAttributes.OUTPUT_VALUE in attrs
+
+
+class TestGetStreamOutputAttributes:
+    """Tests for _get_stream_output_attributes function."""
+
+    def test_concatenated_content(self, mock_stream_chunks):
+        """Should have full concatenated content."""
+        full_content = "Hello! How can I help?"
+        attrs = _get_stream_output_attributes(mock_stream_chunks, full_content)
+
+        assert attrs[SpanAttributes.OUTPUT_VALUE] == full_content
+        assert attrs[f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.0.{MessageAttributes.MESSAGE_CONTENT}"] == full_content
+        assert attrs[f"{SpanAttributes.GEN_AI_OUTPUT_MESSAGES}.0.{MessageAttributes.MESSAGE_ROLE}"] == "assistant"
+
+    def test_model_from_last_chunk(self, mock_stream_chunks):
+        """Should get model from last chunk."""
+        attrs = _get_stream_output_attributes(mock_stream_chunks, "Hello!")
+
+        assert attrs[SpanAttributes.GEN_AI_REQUEST_MODEL] == "meta-llama/Llama-2-7b-chat-hf"
+
+    def test_usage_from_last_chunk(self, mock_stream_chunks):
+        """Should get usage from last chunk."""
+        attrs = _get_stream_output_attributes(mock_stream_chunks, "Hello!")
+
+        assert attrs[SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS] == 10
+        assert attrs[SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS] == 7
+        assert attrs[SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS] == 17
+
+    def test_empty_chunks(self):
+        """Should handle empty chunks list."""
+        attrs = _get_stream_output_attributes([], "")
+
+        assert attrs[SpanAttributes.OUTPUT_VALUE] == ""
+        assert SpanAttributes.GEN_AI_REQUEST_MODEL not in attrs
