@@ -15,3 +15,29 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e . #installing the package in editable mode
 ```
+
+### Run All Tests
+
+```bash
+pytest tests/
+```
+
+### Run with Coverage
+
+```bash
+pytest tests/ --cov=fi_instrumentation --cov-report=html
+```
+
+### Run Specific Test Files
+
+```bash
+# Settings tests
+pytest tests/test_settings.py -v
+
+# Tracer tests
+pytest tests/test_tracers.py -v
+
+# OpenTelemetry integration tests
+pytest tests/test_otel.py -v
+```
+
