@@ -150,3 +150,233 @@ class TestRegisterPlumbsTuning:
     """register() must forward the tuning kwargs to the processor / provider."""
 
     @patch("fi_instrumentation.otel.check_custom_eval_config_exists", return_value=False)
+    @patch("fi_instrumentation.otel.TracerProvider")
+    @patch("fi_instrumentation.otel.BatchSpanProcessor")
+    def test_register_forwards_tuning(self, mock_bsp, _mock_tp, _mock_check):
+        register(
+            batch=True,
+            verbose=False,
+            max_queue_size=7777,
+            schedule_delay_millis=1000,
+            max_export_batch_size=512,
+            export_timeout_millis=15000,
+        )
+        _, kwargs = mock_bsp.call_args
+        assert kwargs["max_queue_size"] == 7777
+        assert kwargs["schedule_delay_millis"] == 1000
+        assert kwargs["max_export_batch_size"] == 512
+        assert kwargs["export_timeout_millis"] == 15000
+
+    @patch("fi_instrumentation.otel.check_custom_eval_config_exists", return_value=False)
+    @patch("fi_instrumentation.otel.TracerProvider")
+    @patch("fi_instrumentation.otel.BatchSpanProcessor")
+    def test_register_defaults_to_none(self, mock_bsp, _mock_tp, _mock_check):
+        """Unset -> None, so upstream env/default behavior is preserved."""
+        register(batch=True, verbose=False)
+        _, kwargs = mock_bsp.call_args
+        assert kwargs["max_queue_size"] is None
+        assert kwargs["schedule_delay_millis"] is None
+        assert kwargs["max_export_batch_size"] is None
+        assert kwargs["export_timeout_millis"] is None
+
+    @patch("fi_instrumentation.otel.check_custom_eval_config_exists", return_value=False)
+    @patch("fi_instrumentation.otel.TracerProvider")
+    @patch("fi_instrumentation.otel.BatchSpanProcessor")
+    def test_register_forwards_exporter_and_provider_config(
+        self, mock_bsp, mock_tp, _mock_check
+    ):
+        sampler = TraceIdRatioBased(0.5)
+        limits = SpanLimits(max_attributes=10)
+        exp = InMemorySpanExporter()
+        register(
+            verbose=False,
+            timeout=30,
+            sampler=sampler,
+            span_limits=limits,
+            span_exporter=exp,
+        )
+        _, bkw = mock_bsp.call_args
+        assert bkw["timeout"] == 30
+        assert bkw["span_exporter"] is exp
+
+        _, pkw = mock_tp.call_args
+        assert pkw["sampler"] is sampler
+        assert pkw["span_limits"] is limits
+
+    @patch("fi_instrumentation.otel.check_custom_eval_config_exists", return_value=False)
+    @patch("fi_instrumentation.otel.TracerProvider")
+    @patch("fi_instrumentation.otel.BatchSpanProcessor")
+    def test_register_omits_provider_kwargs_when_unset(
+        self, _mock_bsp, mock_tp, _mock_check
+    ):
+        """Unset sampler/span_limits are not forwarded -> upstream defaults apply."""
+        register(verbose=False)
+        _, pkw = mock_tp.call_args
+        assert "sampler" not in pkw
+        assert "span_limits" not in pkw
+
+
+class TestRegisterBatchFalse:
+    """batch=False -> SimpleSpanProcessor path: exporter tuning wired, batch tuning warned."""
+
+    @patch("fi_instrumentation.otel.check_custom_eval_config_exists", return_value=False)
+    @patch("fi_instrumentation.otel.TracerProvider")
+    @patch("fi_instrumentation.otel.SimpleSpanProcessor")
+    def test_wires_simple_processor(self, mock_ssp, _mock_tp, _mock_check):
+        register(batch=False, verbose=False, timeout=5)
+        _, kw = mock_ssp.call_args
+        assert kw["timeout"] == 5
+        # batch-only tunables are not passed to SimpleSpanProcessor
+        assert "max_queue_size" not in kw
+
+    @patch("fi_instrumentation.otel.check_custom_eval_config_exists", return_value=False)
+    @patch("fi_instrumentation.otel.TracerProvider")
+    @patch("fi_instrumentation.otel.SimpleSpanProcessor")
+    def test_warns_on_batch_only_params(self, _mock_ssp, _mock_tp, _mock_check):
+        with pytest.warns(UserWarning, match="batch=False"):
+            register(batch=False, verbose=False, max_queue_size=10000)
+
+    @patch("fi_instrumentation.otel.check_custom_eval_config_exists", return_value=False)
+    @patch("fi_instrumentation.otel.TracerProvider")
+    @patch("fi_instrumentation.otel.SimpleSpanProcessor")
+    def test_no_warning_without_batch_params(self, _mock_ssp, _mock_tp, _mock_check):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            register(batch=False, verbose=False, timeout=5)
+
+    @patch("fi_instrumentation.otel.check_custom_eval_config_exists", return_value=False)
+    @patch("fi_instrumentation.otel.TracerProvider")
+    @patch("fi_instrumentation.otel.SimpleSpanProcessor")
+    def test_forwards_span_exporter(self, mock_ssp, _mock_tp, _mock_check):
+        exp = InMemorySpanExporter()
+        register(batch=False, verbose=False, span_exporter=exp)
+        _, kw = mock_ssp.call_args
+        assert kw["span_exporter"] is exp
+
+    def test_warning_fires_across_python_versions(self):
+        """Regression: the warning must not rely on locals() inside a comprehension
+        (broken on <3.12), so it fires regardless of interpreter."""
+        with patch(
+            "fi_instrumentation.otel.check_custom_eval_config_exists", return_value=False
+        ), patch("fi_instrumentation.otel.TracerProvider"), patch(
+            "fi_instrumentation.otel.SimpleSpanProcessor"
+        ), pytest.warns(
+            UserWarning, match=r"schedule_delay_millis"
+        ):
+            register(batch=False, verbose=False, schedule_delay_millis=1000)
+
+
+class TestTracerProviderForwarding:
+    def test_accepts_sampler_and_span_limits(self):
+        """Direct construction forwards provider kwargs to upstream."""
+        sampler = TraceIdRatioBased(0.25)
+        tp = TracerProvider(sampler=sampler, span_limits=SpanLimits(max_attributes=3))
+        assert tp.sampler is sampler
+        assert tp._span_limits.max_attributes == 3
+
+
+class TestPublicReExports:
+    """Concrete samplers are re-exported so `sampler=` is usable without reaching
+    into opentelemetry.*"""
+
+    def test_samplers_and_limits_reexported(self):
+        import fi_instrumentation as fi
+
+        for name in ("Sampler", "ParentBased", "TraceIdRatioBased", "SpanLimits"):
+            assert name in fi.__all__
+            assert hasattr(fi, name)
+        # constructable + accepted by the provider
+        tp = TracerProvider(sampler=fi.ParentBased(fi.TraceIdRatioBased(0.5)), verbose=False)
+        assert tp.sampler is not None
+
+
+class TestEnvPrecedence:
+    """schedule_delay / export_timeout also honor their OTEL_BSP_* env vars."""
+
+    def test_schedule_delay_env_respected(self, clean_bsp_env):
+        os.environ["OTEL_BSP_SCHEDULE_DELAY"] = "7000"
+        p = BatchSpanProcessor(span_exporter=InMemorySpanExporter())
+        assert _bp_get(p, "schedule_delay_millis") == 7000
+
+    def test_export_timeout_env_respected(self, clean_bsp_env):
+        os.environ["OTEL_BSP_EXPORT_TIMEOUT"] = "4000"
+        p = BatchSpanProcessor(span_exporter=InMemorySpanExporter())
+        assert _bp_get(p, "export_timeout_millis") == 4000
+
+
+class TestGrpcTransport:
+    def test_grpc_forwards_timeout(self):
+        pytest.importorskip("grpc")
+        p = BatchSpanProcessor(transport=Transport.GRPC, timeout=11)
+        assert _exporter_of(p)._timeout == 11
+
+
+class TestEndpointRejected:
+    """The corrected docstrings: these classes do NOT accept `endpoint`."""
+
+    def test_batch_rejects_endpoint(self):
+        with pytest.raises(TypeError):
+            BatchSpanProcessor(endpoint="http://x")
+
+    def test_simple_rejects_endpoint(self):
+        with pytest.raises(TypeError):
+            SimpleSpanProcessor(endpoint="http://x")
+
+    def test_provider_rejects_endpoint(self):
+        with pytest.raises(TypeError):
+            TracerProvider(endpoint="http://x")
+
+
+class TestSamplerEffectiveness:
+    """sampler is not just stored -> it actually drops/keeps spans."""
+
+    def _emit_and_count(self, sampler) -> int:
+        exp = InMemorySpanExporter()
+        tp = TracerProvider(sampler=sampler, verbose=False)
+        tp.add_span_processor(SimpleSpanProcessor(span_exporter=exp))
+        tracer = tp.get_tracer(__name__)
+        for i in range(20):
+            with tracer.start_as_current_span(f"s{i}"):
+                pass
+        tp.force_flush()
+        return len(exp.get_finished_spans())
+
+    def test_ratio_zero_drops_all(self):
+        assert self._emit_and_count(TraceIdRatioBased(0.0)) == 0
+
+    def test_ratio_one_keeps_all(self):
+        assert self._emit_and_count(TraceIdRatioBased(1.0)) == 20
+
+
+class TestEndToEndEmit:
+    """Full chain (no mocks): tuned processor actually exports spans."""
+
+    def test_batch_processor_emits(self):
+        exp = InMemorySpanExporter()
+        tp = TracerProvider(verbose=False)
+        tp.add_span_processor(
+            BatchSpanProcessor(span_exporter=exp, max_queue_size=100, max_export_batch_size=32)
+        )
+        tracer = tp.get_tracer(__name__)
+        with tracer.start_as_current_span("root"):
+            with tracer.start_as_current_span("child"):
+                pass
+        tp.force_flush()
+        assert len(exp.get_finished_spans()) == 2
+
+    @patch("fi_instrumentation.otel.check_custom_eval_config_exists", return_value=False)
+    def test_register_with_custom_exporter_does_not_crash(self, _mock_check):
+        """Regression: register() called _tracing_details() unconditionally, which
+        crashed on exporters lacking _endpoint/_headers (e.g. InMemorySpanExporter)."""
+        exp = InMemorySpanExporter()
+        tp = register(
+            project_type=ProjectType.OBSERVE,
+            verbose=False,
+            span_exporter=exp,
+        )
+        tracer = tp.get_tracer(__name__)
+        with tracer.start_as_current_span("s"):
+            pass
+        tp.force_flush()
+        assert len(exp.get_finished_spans()) == 1
+        tp.shutdown()
