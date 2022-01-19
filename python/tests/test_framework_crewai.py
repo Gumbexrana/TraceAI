@@ -297,3 +297,453 @@ class TestKickoffWrapper:
         mock_crew = Mock()
         mock_crew.__class__.__name__ = "Crew"
         mock_crew.key = "crew_key"
+        mock_crew.id = "crew_id"
+        mock_crew.agents = [mock_agent]
+        mock_crew.tasks = [mock_task]
+        mock_crew.usage_metrics = {"prompt_tokens": 200, "completion_tokens": 100, "total_tokens": 300}
+        
+        mock_output = Mock()
+        mock_output.to_dict.return_value = {"result": "success"}
+        
+        wrapped_func = Mock(__name__="kickoff", return_value=mock_output)
+        
+        result = self.wrapper(wrapped_func, mock_crew, (), {})
+        
+        assert result == mock_output
+        
+        # Verify token metrics are set
+        self.mock_span.set_attribute.assert_any_call(
+            SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS, 200
+        )
+        self.mock_span.set_attribute.assert_any_call(
+            SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, 100
+        )
+        self.mock_span.set_attribute.assert_any_call(
+            SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS, 300
+        )
+
+    def test_crew_kickoff_with_new_usage_metrics(self):
+        """Test crew kickoff with new usage metrics format (v0.51+)."""
+        mock_crew = Mock()
+        mock_crew.__class__.__name__ = "Crew"
+        mock_crew.key = "crew_key"
+        mock_crew.id = "crew_id"
+        mock_crew.agents = []
+        mock_crew.tasks = []
+        
+        # New format usage metrics (object with attributes)
+        mock_usage = Mock()
+        mock_usage.prompt_tokens = 150
+        mock_usage.completion_tokens = 75
+        mock_usage.total_tokens = 225
+        mock_crew.usage_metrics = mock_usage
+        
+        mock_output = Mock()
+        mock_output.to_dict.return_value = {"result": "success"}
+        
+        wrapped_func = Mock(__name__="kickoff", return_value=mock_output)
+        
+        self.wrapper(wrapped_func, mock_crew, (), {})
+        
+        # Verify new format token metrics
+        self.mock_span.set_attribute.assert_any_call(
+            SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS, 150
+        )
+        self.mock_span.set_attribute.assert_any_call(
+            SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, 75
+        )
+        self.mock_span.set_attribute.assert_any_call(
+            SpanAttributes.GEN_AI_USAGE_TOTAL_TOKENS, 225
+        )
+
+    def test_crew_kickoff_error_handling(self):
+        """Test error handling in crew kickoff."""
+        mock_crew = Mock()
+        mock_crew.__class__.__name__ = "Crew"
+        mock_crew.key = "crew_key"
+        mock_crew.id = "crew_id"
+        mock_crew.agents = []  # Empty list to avoid iteration issues
+        mock_crew.tasks = []   # Empty list to avoid iteration issues
+        
+        test_exception = Exception("Crew kickoff failed")
+        wrapped_func = Mock(__name__="kickoff", side_effect=test_exception)
+        
+        with pytest.raises(Exception, match="Crew kickoff failed"):
+            self.wrapper(wrapped_func, mock_crew, (), {})
+        
+        # Verify error handling
+        self.mock_span.set_status.assert_called_once()
+        call_args = self.mock_span.set_status.call_args[0][0]
+        assert call_args.status_code == StatusCode.ERROR
+        assert call_args.description == "Crew kickoff failed"
+        self.mock_span.record_exception.assert_called_once_with(test_exception)
+
+    def test_crew_output_without_to_dict(self):
+        """Test crew output that doesn't have to_dict method."""
+        mock_crew = Mock()
+        mock_crew.__class__.__name__ = "Crew"
+        mock_crew.key = "crew_key"
+        mock_crew.id = "crew_id"
+        mock_crew.agents = []
+        mock_crew.tasks = []
+        mock_crew.usage_metrics = {}
+        
+        # Mock output without to_dict method
+        mock_output = Mock()
+        mock_output.to_dict.return_value = None
+        
+        wrapped_func = Mock(__name__="kickoff", return_value=mock_output)
+        
+        result = self.wrapper(wrapped_func, mock_crew, (), {})
+        
+        assert result == mock_output
+        
+        # Should set string representation
+        self.mock_span.set_attribute.assert_any_call("output.value", str(mock_output))
+
+
+class _NotSpecifiedStub:
+    """Stands in for CrewAI's NOT_SPECIFIED sentinel: truthy, but not iterable."""
+
+    def __repr__(self):
+        return "NOT_SPECIFIED"
+
+
+class TestKickoffWrapperTaskContext:
+    """Test how Task.context is recorded on the crew_tasks attribute."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.mock_tracer = MagicMock(spec=trace_api.Tracer)
+        self.mock_span = MagicMock(spec=trace_api.Span)
+        self.mock_context_manager = MagicMock()
+        self.mock_context_manager.__enter__.return_value = self.mock_span
+        self.mock_context_manager.__exit__.return_value = None
+        self.mock_tracer.start_as_current_span.return_value = self.mock_context_manager
+        self.wrapper = _KickoffWrapper(self.mock_tracer)
+
+    def _kickoff_with_task_context(self, context):
+        """Run a one-task crew through the wrapper and return its recorded crew_tasks entry."""
+        mock_task = Mock()
+        mock_task.id = "task_id_1"
+        mock_task.description = "research the topic"
+        mock_task.expected_output = "comprehensive report"
+        mock_task.async_execution = False
+        mock_task.human_input = False
+        mock_task.agent = None
+        mock_task.context = context
+        mock_task.tools = []
+
+        mock_crew = Mock()
+        mock_crew.__class__.__name__ = "Crew"
+        mock_crew.key = "crew_key"
+        mock_crew.id = "crew_id"
+        mock_crew.agents = []
+        mock_crew.tasks = [mock_task]
+        mock_crew.usage_metrics = {}
+
+        mock_output = Mock()
+        mock_output.to_dict.return_value = {"result": "success"}
+        wrapped_func = Mock(__name__="kickoff", return_value=mock_output)
+
+        self.wrapper(wrapped_func, mock_crew, (), {})
+
+        crew_tasks = next(
+            call.args[1]
+            for call in self.mock_span.set_attribute.call_args_list
+            if call.args[0] == "crew_tasks"
+        )
+        return json.loads(crew_tasks)[0]
+
+    def test_unspecified_context_does_not_crash(self):
+        """An unspecified context must not crash the kickoff span (TH-6818).
+
+        CrewAI defaults Task.context to a NOT_SPECIFIED sentinel that is truthy
+        but not iterable, so iterating it raised TypeError.
+        """
+        task = self._kickoff_with_task_context(_NotSpecifiedStub())
+
+        assert task["context"] is None
+
+    def test_none_context(self):
+        """A context of None is recorded as null."""
+        task = self._kickoff_with_task_context(None)
+
+        assert task["context"] is None
+
+    def test_empty_context(self):
+        """A context of [] is recorded as null, matching CrewAI's own None/[] handling."""
+        task = self._kickoff_with_task_context([])
+
+        assert task["context"] is None
+
+    def test_populated_context_records_descriptions(self):
+        """A populated context records the upstream task descriptions."""
+        upstream_one = Mock()
+        upstream_one.description = "first upstream task"
+        upstream_two = Mock()
+        upstream_two.description = "second upstream task"
+
+        task = self._kickoff_with_task_context([upstream_one, upstream_two])
+
+        assert task["context"] == ["first upstream task", "second upstream task"]
+
+
+class TestToolUseWrapper:
+    """Test the ToolUsage._use wrapper for TOOL spans."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.mock_tracer = MagicMock(spec=trace_api.Tracer)
+        self.mock_span = MagicMock(spec=trace_api.Span)
+        self.mock_context_manager = MagicMock()
+        self.mock_context_manager.__enter__.return_value = self.mock_span
+        self.mock_context_manager.__exit__.return_value = None
+        self.mock_tracer.start_as_current_span.return_value = self.mock_context_manager
+        self.wrapper = _ToolUseWrapper(self.mock_tracer)
+
+    def test_tool_use_basic(self):
+        """Test basic tool usage wrapping."""
+        # Mock tool usage instance
+        mock_instance = Mock()
+        mock_instance.__class__.__name__ = "ToolUsage"
+        mock_instance.function_calling_llm = "gpt-4"
+        
+        # Mock tool
+        mock_tool = Mock()
+        mock_tool.name = "search_tool"
+        
+        wrapped_func = Mock(__name__="_use", return_value={"status": "success", "result": "found data"})
+        
+        result = self.wrapper(wrapped_func, mock_instance, (), {"tool": mock_tool})
+        
+        assert result == {"status": "success", "result": "found data"}
+        
+        # Verify span creation
+        self.mock_tracer.start_as_current_span.assert_called_once()
+        call_args = self.mock_tracer.start_as_current_span.call_args
+        assert "ToolUsage._use" in call_args[0][0]
+        
+        # Verify tool attributes
+        self.mock_span.set_attribute.assert_any_call("function_calling_llm", "gpt-4")
+        self.mock_span.set_attribute.assert_any_call(
+            SpanAttributes.GEN_AI_TOOL_NAME, "search_tool"
+        )
+
+    def test_tool_use_without_tool(self):
+        """Test tool usage without tool parameter."""
+        mock_instance = Mock()
+        mock_instance.__class__.__name__ = "ToolUsage"
+        mock_instance.function_calling_llm = "gpt-3.5-turbo"
+        
+        wrapped_func = Mock(__name__="_use", return_value="no tool result")
+        
+        result = self.wrapper(wrapped_func, mock_instance, (), {})
+        
+        assert result == "no tool result"
+        
+        # Should set empty tool name
+        self.mock_span.set_attribute.assert_any_call(SpanAttributes.GEN_AI_TOOL_NAME, "")
+
+    def test_tool_use_error_handling(self):
+        """Test error handling in tool usage."""
+        mock_instance = Mock()
+        mock_instance.__class__.__name__ = "ToolUsage"
+        mock_instance.function_calling_llm = "gpt-4"
+        
+        test_exception = Exception("Tool execution failed")
+        wrapped_func = Mock(__name__="_use", side_effect=test_exception)
+        
+        with pytest.raises(Exception, match="Tool execution failed"):
+            self.wrapper(wrapped_func, mock_instance, (), {})
+        
+        # Verify error handling
+        self.mock_span.set_status.assert_called_once()
+        call_args = self.mock_span.set_status.call_args[0][0]
+        assert call_args.status_code == StatusCode.ERROR
+        assert call_args.description == "Tool execution failed"
+        self.mock_span.record_exception.assert_called_once_with(test_exception)
+
+    @patch("traceai_crewai._wrappers.get_attributes_from_context")
+    def test_tool_context_attributes(self, mock_get_attrs):
+        """Test that context attributes are added to tool spans."""
+        mock_get_attrs.return_value = {"session_id": "tool_session"}
+        
+        mock_instance = Mock()
+        mock_instance.__class__.__name__ = "ToolUsage"
+        mock_instance.function_calling_llm = "gpt-4"
+        
+        wrapped_func = Mock(__name__="_use", return_value="result")
+        
+        self.wrapper(wrapped_func, mock_instance, (), {})
+        
+        # Verify context attributes are set
+        self.mock_span.set_attributes.assert_called_once()
+
+
+class TestUtilityFunctions:
+    """Test utility functions used by the wrappers."""
+
+    def test_safe_json_encoder_basic(self):
+        """Test SafeJSONEncoder with basic serializable objects."""
+        encoder = SafeJSONEncoder()
+        
+        # Should handle normal JSON types
+        result = json.dumps({"key": "value", "number": 42}, cls=SafeJSONEncoder)
+        assert "key" in result
+        assert "value" in result
+
+    def test_safe_json_encoder_with_pydantic(self):
+        """Test SafeJSONEncoder with pydantic-like objects."""
+        # Mock object with dict method
+        mock_obj = Mock()
+        mock_obj.dict.return_value = {"field": "value"}
+        
+        encoder = SafeJSONEncoder()
+        result = encoder.default(mock_obj)
+        
+        assert result == {"field": "value"}
+
+    def test_safe_json_encoder_fallback(self):
+        """Test SafeJSONEncoder fallback to repr."""
+        class CustomClass:
+            def __repr__(self):
+                return "CustomClass()"
+        
+        encoder = SafeJSONEncoder()
+        result = encoder.default(CustomClass())
+        
+        assert result == "CustomClass()"
+
+    def test_flatten_simple_mapping(self):
+        """Test _flatten with simple mapping."""
+        data = {"key1": "value1", "key2": 42}
+        result = dict(_flatten(data))
+        
+        assert result == {"key1": "value1", "key2": 42}
+
+    def test_flatten_nested_mapping(self):
+        """Test _flatten with nested mapping."""
+        data = {
+            "top": {
+                "nested": "value",
+                "deep": {"deeper": "deep_value"}
+            }
+        }
+        result = dict(_flatten(data))
+        
+        assert result["top.nested"] == "value"
+        assert result["top.deep.deeper"] == "deep_value"
+
+    def test_flatten_with_lists(self):
+        """Test _flatten with lists of mappings."""
+        data = {
+            "items": [
+                {"name": "item1", "value": 1},
+                {"name": "item2", "value": 2}
+            ]
+        }
+        result = dict(_flatten(data))
+        
+        assert result["items.0.name"] == "item1"
+        assert result["items.1.value"] == 2
+
+    def test_flatten_with_enum(self):
+        """Test _flatten with enum values."""
+        class TestEnum(Enum):
+            VALUE = "test_value"
+        
+        data = {"enum_field": TestEnum.VALUE}
+        result = dict(_flatten(data))
+        
+        assert result["enum_field"] == "test_value"
+
+    def test_flatten_with_none_values(self):
+        """Test _flatten skips None values."""
+        data = {"valid": "value", "null": None}
+        result = dict(_flatten(data))
+        
+        assert "valid" in result
+        assert "null" not in result
+
+    def test_get_input_value_with_tool_calling(self):
+        """Test _get_input_value with ToolCalling object."""
+        # Mock ToolCalling
+        mock_tool_calling = Mock()
+        mock_tool_calling.tool_name = "search"
+        mock_tool_calling.arguments = {"query": "test"}
+        
+        # Import the real class for isinstance check
+        with patch("traceai_crewai._wrappers.ToolCalling", mock_tool_calling.__class__):
+            mock_method = Mock()
+            
+            result = _get_input_value(mock_method, calling=mock_tool_calling)
+            
+            parsed_result = json.loads(result)
+            assert parsed_result["tool_name"] == "search"
+            assert parsed_result["tool_args"] == {"query": "test"}
+
+    def test_get_input_value_with_agent(self):
+        """Test _get_input_value with Agent object."""
+        # Mock Agent
+        mock_agent = Mock()
+        mock_agent.role = "researcher"
+        mock_agent.goal = "research topics"
+        mock_agent.backstory = "expert in research"
+        
+        # Import the real class for isinstance check
+        with patch("traceai_crewai._wrappers.Agent", mock_agent.__class__):
+            mock_method = Mock()
+            
+            result = _get_input_value(mock_method, mock_agent)
+            
+            parsed_result = json.loads(result)
+            assert parsed_result["role"] == "researcher"
+            assert parsed_result["goal"] == "research topics"
+            assert parsed_result["backstory"] == "expert in research"
+
+    def test_convert_to_dict_with_to_dict_method(self):
+        """Test _convert_to_dict with object having to_dict method."""
+        mock_obj = Mock()
+        mock_obj.to_dict.return_value = {"converted": True}
+        
+        result = _convert_to_dict(mock_obj)
+        assert result == {"converted": True}
+
+    def test_convert_to_dict_with_dict_attr(self):
+        """Test _convert_to_dict with object having __dict__ attribute."""
+        class TestObj:
+            def __init__(self):
+                self.field = "value"
+        
+        obj = TestObj()
+        result = _convert_to_dict(obj)
+        assert result == {"field": "value"}
+
+    def test_convert_to_dict_with_nested_structures(self):
+        """Test _convert_to_dict with nested lists and dicts."""
+        mock_obj = Mock()
+        mock_obj.to_dict.return_value = {"nested": True}
+        
+        data = {
+            "list": [mock_obj, "string"],
+            "dict": {"nested": mock_obj}
+        }
+        
+        result = _convert_to_dict(data)
+        assert result["list"][0] == {"nested": True}
+        assert result["dict"]["nested"] == {"nested": True}
+
+    def test_prepare_args_kwargs(self):
+        """Test _prepare_args_kwargs function."""
+        mock_obj = Mock()
+        mock_obj.to_dict.return_value = {"converted": True}
+        
+        args = (mock_obj, "string")
+        kwargs = {"param": mock_obj}
+        
+        result = _prepare_args_kwargs(args, **kwargs)
+        
+        assert "args" in result
+        assert result["args"][0] == {"converted": True}
+        assert result["param"] == {"converted": True} 
