@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "traceai"
+version = "0.1.0"
+description = "TraceAI - Simple one-liner SDK for FutureAGI observability"
+authors = ["Future AGI <no-reply@futureagi.com>"]
+
+packages = [
+    { include = "traceai", from = ".." },
+]
+
+[tool.poetry.dependencies]
+python = ">3.9,<3.13"
+fi-instrumentation-otel = ">=0.1.7"
+
+[tool.poetry.extras]
+# Optional instrumentors
