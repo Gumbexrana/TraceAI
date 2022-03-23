@@ -14,3 +14,29 @@ fi-instrumentation-otel = ">=0.1.7"
 
 [tool.poetry.extras]
 # Optional instrumentors
+openai = ["traceai-openai"]
+anthropic = ["traceai-anthropic"]
+langchain = ["traceai-langchain"]
+llamaindex = ["traceai-llamaindex"]
+litellm = ["traceai-litellm"]
+groq = ["traceai-groq"]
+mistralai = ["traceai-mistralai"]
+cohere = ["traceai-cohere"]
+bedrock = ["traceai-bedrock"]
+vertexai = ["traceai-vertexai"]
+crewai = ["traceai-crewai"]
+autogen = ["traceai-autogen"]
+dspy = ["traceai-dspy"]
+haystack = ["traceai-haystack"]
+instructor = ["traceai-instructor"]
+all = [
+    "traceai-openai",
+    "traceai-anthropic",
+    "traceai-langchain",
+    "traceai-llamaindex",
+    "traceai-litellm",
+]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
