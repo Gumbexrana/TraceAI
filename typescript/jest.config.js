@@ -16,3 +16,12 @@ module.exports = {
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+  moduleNameMapper: {
+    '^@traceai/(.*)$': '<rootDir>/packages/$1/src'
+  },
+  transform: {
+    '^.+\\.ts$': 'ts-jest'
+  },
+  testTimeout: 10000
+}; 
