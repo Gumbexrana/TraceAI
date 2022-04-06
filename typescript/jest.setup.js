@@ -35,3 +35,20 @@ global.testUtils = {
     isRecording: jest.fn().mockReturnValue(true),
     getSpanContext: jest.fn().mockReturnValue({
       traceId: 'mock-trace-id',
+      spanId: 'mock-span-id',
+      traceFlags: 1,
+    }),
+  }),
+  
+  // Helper to create mock tracer
+  createMockTracer: () => ({
+    startSpan: jest.fn().mockReturnValue(global.testUtils.createMockSpan()),
+    startActiveSpan: jest.fn((name, fn) => fn(global.testUtils.createMockSpan())),
+  }),
+  
+  // Common test data
+  mockApiKey: 'test-api-key-123',
+  mockModel: 'gpt-3.5-turbo',
+  mockPrompt: 'Test prompt for LLM',
+  mockResponse: 'Test response from LLM',
+}; 
