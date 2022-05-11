@@ -5,3 +5,6 @@
     { "path": "./packages/fi-semantic-conventions" },
     { "path": "./packages/traceai_openai" },
     { "path": "./packages/traceai_anthropic" },
+    { "path": "./packages/traceai_langchain" }
+  ]
+} 
