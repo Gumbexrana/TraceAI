@@ -271,3 +271,120 @@ describe("ChromaDB E2E Tests", () => {
 
       // Step 3: Retrieve relevant context
       const retrievalResults = await collection.query({
+        queryEmbeddings: [questionEmbedding],
+        nResults: 2,
+        where: { source: "knowledge_base" },
+      });
+
+      expect(retrievalResults.ids[0].length).toBeLessThanOrEqual(2);
+
+      // Verify all operations were traced
+      const spans = getCapturedSpans();
+      expect(spans.length).toBeGreaterThan(0);
+
+      // Check that we have both add and query operations traced
+      const operationNames = spans.map((s) => getSpanAttributes(s)["db.operation.name"]);
+      expect(operationNames).toContain("add");
+      expect(operationNames).toContain("query");
+    });
+  });
+
+  describe("Real-World Use Case: Chatbot Memory", () => {
+    test("should trace conversation history storage and retrieval", async () => {
+      const conversationId = `conv_${Date.now()}`;
+
+      // Store conversation turns
+      const conversationTurns = [
+        {
+          id: `${conversationId}_turn_1`,
+          text: "User: What services do you offer?",
+          embedding: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+        },
+        {
+          id: `${conversationId}_turn_2`,
+          text: "Assistant: We offer AI consulting, model development, and data analysis.",
+          embedding: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+        },
+        {
+          id: `${conversationId}_turn_3`,
+          text: "User: Tell me more about model development.",
+          embedding: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+        },
+      ];
+
+      // Store conversation history
+      await collection.add({
+        ids: conversationTurns.map((t) => t.id),
+        documents: conversationTurns.map((t) => t.text),
+        embeddings: conversationTurns.map((t) => t.embedding),
+        metadatas: conversationTurns.map((t, i) => ({
+          conversation_id: conversationId,
+          turn_number: i + 1,
+          timestamp: new Date().toISOString(),
+        })),
+      });
+
+      // Retrieve relevant conversation context
+      const contextQuery = generateRandomEmbedding(EMBEDDING_DIMENSIONS);
+      const relevantContext = await collection.query({
+        queryEmbeddings: [contextQuery],
+        nResults: 3,
+        where: { conversation_id: conversationId },
+      });
+
+      expect(relevantContext.ids[0].length).toBeGreaterThan(0);
+
+      // Verify traces
+      const spans = getCapturedSpans();
+      expect(spans.some((s) => getSpanAttributes(s)["db.operation.name"] === "add")).toBe(true);
+      expect(spans.some((s) => getSpanAttributes(s)["db.operation.name"] === "query")).toBe(true);
+    });
+  });
+
+  describe("Real-World Use Case: Document Similarity Search", () => {
+    test("should trace similarity search with metadata filtering", async () => {
+      // Index documents with categories
+      const documents = [
+        {
+          id: "tech_1",
+          text: "Kubernetes orchestrates containerized applications at scale.",
+          category: "technology",
+          embedding: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+        },
+        {
+          id: "tech_2",
+          text: "Docker containers provide lightweight virtualization.",
+          category: "technology",
+          embedding: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+        },
+        {
+          id: "business_1",
+          text: "Revenue growth exceeded expectations this quarter.",
+          category: "business",
+          embedding: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+        },
+      ];
+
+      await collection.add({
+        ids: documents.map((d) => d.id),
+        documents: documents.map((d) => d.text),
+        embeddings: documents.map((d) => d.embedding),
+        metadatas: documents.map((d) => ({ category: d.category })),
+      });
+
+      // Search only within technology category
+      const searchEmbedding = generateRandomEmbedding(EMBEDDING_DIMENSIONS);
+      const techResults = await collection.query({
+        queryEmbeddings: [searchEmbedding],
+        nResults: 5,
+        where: { category: "technology" },
+      });
+
+      // All results should be from technology category
+      expect(techResults.ids[0].every((id) => id.startsWith("tech_") || id.startsWith("kb_") || id.startsWith("doc"))).toBe(true);
+
+      const spans = getCapturedSpans();
+      expect(spans.length).toBeGreaterThan(0);
+    });
+  });
+});
