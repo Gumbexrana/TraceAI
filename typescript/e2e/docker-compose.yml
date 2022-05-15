@@ -27,3 +27,16 @@ services:
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
     volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Note: Pinecone is a managed service, so we use mock server for E2E tests
+  # For real Pinecone tests, set PINECONE_API_KEY and PINECONE_INDEX environment variables
+
+volumes:
+  chromadb_data:
+  qdrant_data:
