@@ -21,3 +21,13 @@
   },
   "dependencies": {
     "@opentelemetry/api": "^1.7.0",
+    "@opentelemetry/sdk-trace-base": "^1.21.0",
+    "@opentelemetry/sdk-trace-node": "^1.21.0",
+    "@qdrant/js-client-rest": "^1.7.0",
+    "chromadb": "^1.7.3",
+    "@traceai/chromadb": "workspace:*",
+    "@traceai/qdrant": "workspace:*",
+    "@traceai/fi-core": "workspace:*",
+    "@traceai/fi-semantic-conventions": "workspace:*"
+  }
+}
