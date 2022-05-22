@@ -379,3 +379,167 @@ describe("Qdrant E2E Tests", () => {
         filter: {
           must: [
             { key: "category", match: { value: "electronics" } },
+            { key: "in_stock", match: { value: true } },
+          ],
+        },
+        with_payload: true,
+      });
+
+      expect(searchResults).toBeDefined();
+
+      const spans = getCapturedSpans();
+      const searchSpan = spans.find((s) =>
+        getSpanAttributes(s)["db.operation.name"] === "search"
+      );
+      expect(searchSpan).toBeDefined();
+    });
+  });
+
+  describe("Real-World Use Case: Image Similarity Search", () => {
+    test("should trace image embedding search", async () => {
+      // Simulate image embeddings (e.g., from CLIP model)
+      const images = [
+        {
+          id: 300,
+          vector: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+          payload: {
+            filename: "sunset_beach.jpg",
+            tags: ["nature", "beach", "sunset"],
+            width: 1920,
+            height: 1080,
+          },
+        },
+        {
+          id: 301,
+          vector: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+          payload: {
+            filename: "mountain_view.jpg",
+            tags: ["nature", "mountain", "landscape"],
+            width: 2560,
+            height: 1440,
+          },
+        },
+        {
+          id: 302,
+          vector: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+          payload: {
+            filename: "city_skyline.jpg",
+            tags: ["urban", "city", "architecture"],
+            width: 3840,
+            height: 2160,
+          },
+        },
+      ];
+
+      await client.upsert(testCollectionName, {
+        wait: true,
+        points: images,
+      });
+
+      // Search for similar images
+      const queryImageVector = generateRandomEmbedding(EMBEDDING_DIMENSIONS);
+      const similarImages = await client.search(testCollectionName, {
+        vector: queryImageVector,
+        limit: 3,
+        with_payload: true,
+      });
+
+      expect(similarImages).toBeDefined();
+
+      // Verify traces captured the full workflow
+      const spans = getCapturedSpans();
+      expect(spans.some((s) => getSpanAttributes(s)["db.operation.name"] === "upsert")).toBe(true);
+      expect(spans.some((s) => getSpanAttributes(s)["db.operation.name"] === "search")).toBe(true);
+    });
+  });
+
+  describe("Real-World Use Case: Recommendation Engine", () => {
+    test("should trace user preference-based recommendations", async () => {
+      // Index items with various features
+      const items = [
+        {
+          id: 400,
+          vector: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+          payload: {
+            item_id: "movie_001",
+            title: "Sci-Fi Adventure",
+            genre: "sci-fi",
+            rating: 4.5,
+          },
+        },
+        {
+          id: 401,
+          vector: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+          payload: {
+            item_id: "movie_002",
+            title: "Comedy Special",
+            genre: "comedy",
+            rating: 4.2,
+          },
+        },
+        {
+          id: 402,
+          vector: generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+          payload: {
+            item_id: "movie_003",
+            title: "Space Opera",
+            genre: "sci-fi",
+            rating: 4.8,
+          },
+        },
+      ];
+
+      await client.upsert(testCollectionName, {
+        wait: true,
+        points: items,
+      });
+
+      // Get recommendations based on user's viewing history embedding
+      const userPreferenceVector = generateRandomEmbedding(EMBEDDING_DIMENSIONS);
+      const recommendations = await client.search(testCollectionName, {
+        vector: userPreferenceVector,
+        limit: 3,
+        filter: {
+          must: [{ key: "genre", match: { value: "sci-fi" } }],
+        },
+        with_payload: true,
+        score_threshold: 0.0, // Accept all matches for testing
+      });
+
+      expect(recommendations).toBeDefined();
+
+      const spans = getCapturedSpans();
+      expect(spans.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("Batch Operations", () => {
+    test("should trace batch search operations", async () => {
+      // Perform multiple searches
+      const queries = [
+        generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+        generateRandomEmbedding(EMBEDDING_DIMENSIONS),
+      ];
+
+      const results = await Promise.all(
+        queries.map((vector) =>
+          client.search(testCollectionName, {
+            vector,
+            limit: 2,
+          })
+        )
+      );
+
+      expect(results.length).toBe(2);
+      results.forEach((result) => {
+        expect(result.length).toBeLessThanOrEqual(2);
+      });
+
+      const spans = getCapturedSpans();
+      const searchSpans = spans.filter(
+        (s) => getSpanAttributes(s)["db.operation.name"] === "search"
+      );
+      expect(searchSpans.length).toBe(2);
+    });
+  });
+});
