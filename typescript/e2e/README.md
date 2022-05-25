@@ -110,3 +110,51 @@ The `setup.ts` file provides common utilities:
 - `getSpanAttributes(span)`: Get span attributes
 - `generateRandomEmbedding(dimensions)`: Generate random embeddings for testing
 - `waitForService(checkFn, maxAttempts, intervalMs)`: Wait for a service to be ready
+
+## Pinecone E2E Tests
+
+Pinecone is a managed cloud service and requires an API key. To run Pinecone E2E tests:
+
+1. Set environment variables:
+   ```bash
+   export PINECONE_API_KEY=your-api-key
+   export PINECONE_INDEX=your-index-name
+   ```
+
+2. Create a Pinecone index with the appropriate dimensions (384 for test embeddings)
+
+3. Run the Pinecone-specific tests
+
+Note: Pinecone tests are not included in the default test suite to avoid requiring cloud credentials.
+
+## Troubleshooting
+
+### Services not starting
+
+Check Docker logs:
+```bash
+docker-compose logs chromadb
+docker-compose logs qdrant
+```
+
+### Tests timing out
+
+The tests have a 60-second timeout. If services are slow to respond:
+1. Increase `testTimeout` in `jest.config.js`
+2. Check service health endpoints
+3. Ensure Docker has sufficient resources
+
+### Connection refused
+
+Ensure Docker containers are running and ports are exposed:
+```bash
+docker-compose ps
+```
+
+## Writing New E2E Tests
+
+1. Import the instrumentation and enable it before tests
+2. Use `clearCapturedSpans()` in `beforeEach` to isolate tests
+3. Use `getCapturedSpans()` to verify traces were captured
+4. Use `getSpanAttributes()` to verify span attributes
+5. Include real-world scenario tests that demonstrate typical usage patterns
