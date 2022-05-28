@@ -58,3 +58,29 @@ export function generateTestDocuments(count: number, dimensions: number) {
 
 // Wait for service to be ready
 export async function waitForService(
+  checkFn: () => Promise<boolean>,
+  maxAttempts = 30,
+  intervalMs = 1000
+): Promise<void> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      if (await checkFn()) {
+        return;
+      }
+    } catch (e) {
+      // Service not ready yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("Service did not become ready in time");
+}
+
+// Clean up after all tests
+afterAll(async () => {
+  spanExporter.reset();
+});
+
+// Clear spans before each test
+beforeEach(() => {
+  spanExporter.reset();
+});
