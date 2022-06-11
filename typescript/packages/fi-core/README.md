@@ -150,3 +150,69 @@ The evaluation system provides comprehensive AI model assessment capabilities:
 
 ### Simple LLM Tracing
 
+```typescript
+import { trace } from '@opentelemetry/api';
+import { register, ProjectType } from '@traceai/fi-core';
+
+// Initialize
+register({
+  projectName: 'llm-chat-bot',
+  projectType: ProjectType.EXPERIMENT,
+  evalTags: [
+new EvalTag({
+            type: EvalTagType.OBSERVATION_SPAN,
+            value: EvalSpanKind.LLM,
+            eval_name: EvalName.CHUNK_ATTRIBUTION,
+            config: {},
+            custom_eval_name: "Chunk_Attribution_5",
+            mapping: {
+            "context": "raw.input",
+            "output": "raw.output"
+            },
+            model: ModelChoices.TURING_SMALL
+        })
+  ]
+});
+
+// Create traces
+const tracer = trace.getTracer('my-app');
+const span = tracer.startSpan('llm-completion');
+
+span.setAttributes({
+  'llm.model': 'gpt-4o-mini',
+  'llm.prompt': 'What is the capital of France?',
+  'llm.response': 'The capital of France is Paris.'
+});
+
+span.end();
+```
+
+## Development
+
+### Building
+
+```bash
+pnpm build
+```
+
+### Testing
+
+```bash
+pnpm test
+```
+
+### Linting
+
+```bash
+pnpm lint
+```
+
+## Contributing
+
+This package is part of the TraceAI project. Please refer to the main repository for contribution guidelines.
+
+## Links
+
+- [GitHub Repository](https://github.com/future-agi/traceAI)
+- [Issues](https://github.com/future-agi/traceAI/issues)
+- [TraceAI Platform](https://api.futureagi.com)
