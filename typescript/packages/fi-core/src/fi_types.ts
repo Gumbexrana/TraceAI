@@ -618,3 +618,269 @@ function getMappingForEval(evalName: EvalName): EvalMapping {
     [EvalName.EMBEDDING_SIMILARITY]: {
       response: { type: "string", required: true },
       expected_text: { type: "string", required: true },
+    },
+    [EvalName.SEMANTIC_LIST_CONTAINS]: {
+      response: { type: "string", required: true },
+      expected_text: { type: "string", required: true },
+    },
+    [EvalName.IS_AI_GENERATED_IMAGE]: {
+      input_image: { type: "string", required: true },
+    },
+  };
+
+  if (!(evalName in mappings)) {
+    throw new Error(`No mapping definition found for eval: ${evalName}`);
+  }
+
+  return mappings[evalName]!;
+}
+
+function validateFieldType(
+  key: string,
+  expectedType: string,
+  value: any
+): void {
+  const typeMap: Record<string, string> = {
+    string: "string",
+    number: "number",
+    boolean: "boolean",
+    object: "object",
+    array: "object", // Arrays are objects in JavaScript
+  };
+
+  const expectedJsType = typeMap[expectedType];
+  if (!expectedJsType) {
+    throw new Error(`Unknown type '${expectedType}' for field '${key}'`);
+  }
+
+  if (expectedType === "array" && !Array.isArray(value)) {
+    throw new Error(`Field '${key}' must be an array, got ${typeof value}`);
+  } else if (expectedType !== "array" && typeof value !== expectedJsType) {
+    throw new Error(
+      `Field '${key}' must be of type '${expectedType}', got '${typeof value}'`
+    );
+  }
+}
+
+// Export both the interface and the class
+interface IEvalTag {
+  type: EvalTagType;
+  value: EvalSpanKind;
+  eval_name: EvalName | string;
+  custom_eval_name: string;
+  config: Record<string, any>;
+  mapping: Record<string, string>;
+  score?: number;
+  rationale?: string | null;
+  metadata?: Record<string, any> | null;
+  toDict(): Record<string, any>;
+  toString(): string;
+  model?: ModelChoices;
+}
+
+class EvalTag implements IEvalTag {
+  type: EvalTagType;
+  value: EvalSpanKind;
+  eval_name: EvalName | string;
+  custom_eval_name: string;
+  config: Record<string, any>;
+  mapping: Record<string, string>;
+  score?: number;
+  rationale?: string | null;
+  metadata?: Record<string, any> | null;
+  model?: ModelChoices;
+
+  constructor(params: {
+    type: EvalTagType;
+    value: EvalSpanKind;
+    eval_name: EvalName | string;
+    custom_eval_name: string;
+    config?: Record<string, any>;
+    mapping?: Record<string, string>;
+    score?: number;
+    rationale?: string | null;
+    metadata?: Record<string, any> | null;
+    model?: ModelChoices;
+  }) {
+    this.type = params.type;
+    this.value = params.value;
+    this.eval_name = params.eval_name;
+    this.custom_eval_name =
+      params.custom_eval_name ?? (params.eval_name as string);
+    this.config = params.config || {};
+    this.mapping = params.mapping || {};
+    this.score = params.score;
+    this.rationale = params.rationale;
+    this.metadata = params.metadata;
+    this.model = params.model;
+    // Don't call validate() here - use static factory method instead
+  }
+
+  // Static factory method for async creation with validation
+  static async create(params: {
+    type: EvalTagType;
+    value: EvalSpanKind;
+    eval_name: EvalName | string;
+    custom_eval_name: string;
+    config?: Record<string, any>;
+    mapping?: Record<string, string>;
+    score?: number;
+    rationale?: string | null;
+    metadata?: Record<string, any> | null;
+    model?: ModelChoices;
+  }): Promise<EvalTag> {
+    const tag = new EvalTag(params);
+    await tag.validate();
+    return tag;
+  }
+
+  private async validate(): Promise<void> {
+    // Basic validation checks
+    if (!Object.values(EvalSpanKind).includes(this.value)) {
+      throw new Error(
+        `value must be a EvalSpanKind enum, got ${typeof this.value}`
+      );
+    }
+
+    if (!Object.values(EvalTagType).includes(this.type)) {
+      throw new Error(
+        `type must be an EvalTagType enum, got ${typeof this.type}`
+      );
+    }
+
+    const customEvalTemplate: CheckCustomEvalTemplateExistsResponse =
+      await checkCustomEvalTemplateExists(this.eval_name as string);
+
+    if (!customEvalTemplate.result?.isUserEvalTemplate) {
+      if (!Object.values(EvalName).includes(this.eval_name as EvalName)) {
+        throw new Error(
+          `Invalid eval_name '${this.eval_name}'. Expected one of: ${Object.values(EvalName).slice(0, 5).join(', ')}... (${Object.values(EvalName).length} total options)`
+        );
+      }
+
+      if (!this.model || !Object.values(ModelChoices).includes(this.model)) {
+        throw new Error(
+          `Model must be provided in case of fagi evals. Model must be a valid model name, got ${
+            this.model
+          }. Expected values are: ${Object.values(ModelChoices).join(", ")}`
+        );
+      }
+
+      // Get expected config for this eval type
+      const expectedConfig = getConfigForEval(this.eval_name as EvalName);
+
+      // Validate config fields
+      for (const [key, fieldConfig] of Object.entries(expectedConfig)) {
+        if (!(key in this.config)) {
+          if (fieldConfig.required) {
+            throw new Error(
+              `Required field '${key}' is missing from config for ${this.eval_name}`
+            );
+          }
+          this.config[key] = fieldConfig.default;
+        } else {
+          validateFieldType(key, fieldConfig.type, this.config[key]);
+        }
+      }
+
+      // Check for unexpected config fields
+      for (const key in this.config) {
+        if (!(key in expectedConfig)) {
+          throw new Error(
+            `Unexpected field '${key}' in config for ${
+              this.eval_name
+            }. Allowed fields are: ${Object.keys(expectedConfig).join(", ")}`
+          );
+        }
+      }
+    }
+
+    // Get expected mapping for this eval type
+    let expectedMapping = null;
+    let requiredKeys: string[] = [];
+    if (customEvalTemplate.result?.isUserEvalTemplate) {
+      requiredKeys =
+        customEvalTemplate.result?.evalTemplate?.config?.requiredKeys ?? [];
+    } else {
+      expectedMapping = getMappingForEval(this.eval_name as EvalName);
+      for (const [key, fieldConfig] of Object.entries(expectedMapping)) {
+        if (fieldConfig.required) {
+          requiredKeys.push(key);
+        }
+      }
+    }
+
+    // Validate mapping fields
+    for (const key of requiredKeys) {
+      if (!(key in this.mapping)) {
+        throw new Error(
+          `Required mapping field '${key}' is missing for ${this.eval_name}`
+        );
+      }
+    }
+
+    // Check for unexpected mapping fields
+    for (const key in this.mapping) {
+      if (
+        !customEvalTemplate.result?.isUserEvalTemplate &&
+        expectedMapping &&
+        !(key in expectedMapping)
+      ) {
+        throw new Error(
+          `Unexpected mapping field '${key}' for ${
+            this.eval_name
+          }. Allowed fields are: ${Object.keys(expectedMapping).join(", ")}`
+        );
+      }
+      if (typeof key !== "string") {
+        throw new Error(`All mapping keys must be strings, got ${typeof key}`);
+      }
+      if (typeof this.mapping[key] !== "string") {
+        throw new Error(
+          `All mapping values must be strings, got ${typeof this.mapping[key]}`
+        );
+      }
+    }
+  }
+
+  toDict(): Record<string, any> {
+    return {
+      type: this.type,
+      value: this.value,
+      eval_name: this.eval_name,
+      config: this.config,
+      mapping: this.mapping,
+      custom_eval_name: this.custom_eval_name,
+      score: this.score,
+      rationale: this.rationale,
+      metadata: this.metadata,
+      model: this.model,
+    };
+  }
+
+  toString(): string {
+    return `EvalTag(type=${this.type}, value=${this.value}, eval_name=${this.eval_name})`;
+  }
+}
+
+function prepareEvalTags(evalTags: IEvalTag[]): Record<string, any>[] {
+  return evalTags.map((tag) => tag.toDict());
+}
+
+export {
+  ProjectType,
+  EvalTagType,
+  EvalSpanKind,
+  EvalName,
+  ConfigField,
+  EvalConfig,
+  EvalMapping,
+  getConfigForEval,
+  getMappingForEval,
+  validateFieldType,
+  prepareEvalTags,
+  // Export both the interface and the class
+  IEvalTag,
+  EvalTag,
+  ModelChoices,
+};
