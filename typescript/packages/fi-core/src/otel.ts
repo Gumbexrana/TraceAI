@@ -567,3 +567,248 @@ if (!projectName) {
 
   
   // Headers for the exporter
+  const exporterHeaders = optHeaders ?? getEnvFiAuthHeader();
+  // Endpoint for the exporter is now determined by FITracerProvider's constructor
+  // using _constructFullEndpoint, which considers optEndpoint and env vars.
+
+  const tracerProvider = new FITracerProvider({
+    resource,
+    verbose,
+    idGenerator,
+    endpoint: optEndpoint,
+    headers: exporterHeaders,
+    transport,
+  });
+
+  if (batch) {
+    let batchExporter: SpanExporter;
+    if (transport === Transport.GRPC) {
+      batchExporter = new GRPCSpanExporter({
+        endpoint: (tracerProvider as any).endpoint,
+        headers: exporterHeaders,
+        verbose: verbose
+      });
+    } else {
+      batchExporter = new _OTLPHTTPTraceExporter({
+        url: (tracerProvider as any).endpoint,
+        headers: exporterHeaders,
+      });
+    }
+    const batchProcessor = new OTelBatchSpanProcessor(batchExporter);
+
+    (tracerProvider as any)._registeredSpanProcessors = [];
+    (tracerProvider as any)._defaultProcessorAttached = false;
+    tracerProvider.addSpanProcessor(batchProcessor);
+  }
+
+  if (setGlobalTracerProvider) {
+    trace.setGlobalTracerProvider(tracerProvider);
+    if (verbose) {
+      diag.info(
+        "|  \n" +
+        "|  `register` has set this TracerProvider as the global OpenTelemetry default.\n" +
+        "|  To disable this behavior, call `register` with " +
+        "`set_global_tracer_provider=false`.\n"
+      );
+    }
+  }
+
+  return tracerProvider;
+}
+
+interface CheckExistsResponse {
+  result?: {
+    exists?: boolean;
+  };
+  // Add other fields if the API returns more
+}
+
+export interface CheckCustomEvalTemplateExistsResponse {
+  result?: {
+    isUserEvalTemplate?: boolean;
+    evalTemplate?: any
+  };
+  // Add other fields if the API returns more
+}
+
+async function checkCustomEvalConfigExists(
+  projectName: string,
+  evalTags: any[], // Expects result of prepareEvalTags
+  customEndpoint?: string, // Can be base or full URL for the API call itself
+  verbose?: boolean
+): Promise<boolean> {
+  if (!evalTags || evalTags.length === 0) {
+    return false;
+  }
+
+  let apiBaseUrl: string;
+  if (customEndpoint) {
+    try {
+      const parsedCustom = new URL(customEndpoint);
+      if (parsedCustom.pathname.endsWith(FI_CUSTOM_EVAL_CONFIG_CHECK_PATH)) {
+        if (verbose) diag.info(`checkCustomEvalConfigExists: Using custom full endpoint: ${customEndpoint}`);
+        apiBaseUrl = customEndpoint.substring(0, customEndpoint.lastIndexOf(FI_CUSTOM_EVAL_CONFIG_CHECK_PATH));
+      } else if (parsedCustom.pathname === "/" || parsedCustom.pathname === "") { 
+         apiBaseUrl = `${parsedCustom.protocol}//${parsedCustom.host}`;
+      } else { 
+         apiBaseUrl = customEndpoint; 
+      }
+    } catch (e) {
+      if (verbose) diag.warn(`checkCustomEvalConfigExists: Custom endpoint '${customEndpoint}' is not a valid URL. Falling back to environment or default.`);
+      apiBaseUrl = getEnv("FI_BASE_URL") ?? getEnv("FI_COLLECTOR_ENDPOINT") ?? DEFAULT_FI_COLLECTOR_BASE_URL;
+    }
+  } else {
+    apiBaseUrl = getEnv("FI_BASE_URL") ?? getEnv("FI_COLLECTOR_ENDPOINT") ?? DEFAULT_FI_COLLECTOR_BASE_URL;
+  }
+
+  if (apiBaseUrl.endsWith('/')) {
+    apiBaseUrl = apiBaseUrl.slice(0, -1);
+  }
+  const url = `${apiBaseUrl}${FI_CUSTOM_EVAL_CONFIG_CHECK_PATH}`;
+
+  const headers: FIHeaders = {
+    "Content-Type": "application/json",
+    ...(getEnvFiAuthHeader() || {}),
+  };
+
+  const payload = {
+    project_name: projectName,
+    eval_tags: evalTags,
+  };
+
+  if (verbose) {
+    diag.info(`checkCustomEvalConfigExists: Checking custom eval config at ${url} with payload:`, JSON.stringify(payload, null, 2));
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      diag.error(
+        `checkCustomEvalConfigExists: Failed to check custom eval config: ${response.status} ${response.statusText} - ${errorText}`,
+      );
+      return false; 
+    }
+
+    const result = await response.json() as CheckExistsResponse;
+    if (verbose) {
+        diag.info("checkCustomEvalConfigExists: Response from server:", JSON.stringify(result, null, 2));
+    }
+    return result?.result?.exists === true;
+  } catch (error) {
+    diag.error(`checkCustomEvalConfigExists: Error checking custom eval config: ${error}`);
+    return false;
+  }
+}
+
+export async function checkCustomEvalTemplateExists(
+  eval_template_name: string,
+  verbose?: boolean,
+  customEndpoint?: string,
+): Promise<CheckCustomEvalTemplateExistsResponse> {
+  if (!eval_template_name || eval_template_name.length === 0) {
+    const response: CheckCustomEvalTemplateExistsResponse = {
+      result: {
+        isUserEvalTemplate: false,
+        evalTemplate: null
+      }
+    }
+    return response;
+  }
+
+  let apiBaseUrl: string;
+  if (customEndpoint) {
+    try {
+      const parsedCustom = new URL(customEndpoint);
+      if (parsedCustom.pathname.endsWith(FI_CUSTOM_EVAL_TEMPLATE_CHECK_PATH)) {
+        if (verbose) diag.info(`checkCustomEvalTemplateExists: Using custom full endpoint: ${customEndpoint}`);
+        apiBaseUrl = customEndpoint.substring(0, customEndpoint.lastIndexOf(FI_CUSTOM_EVAL_TEMPLATE_CHECK_PATH));
+      } else if (parsedCustom.pathname === "/" || parsedCustom.pathname === "") { 
+         apiBaseUrl = `${parsedCustom.protocol}//${parsedCustom.host}`;
+      } else { 
+         apiBaseUrl = customEndpoint; 
+      }
+    } catch (e) {
+      if (verbose) diag.warn(`checkCustomEvalTemplateExists: Custom endpoint '${customEndpoint}' is not a valid URL. Falling back to environment or default.`);
+      apiBaseUrl = getEnv("FI_BASE_URL") ?? getEnv("FI_COLLECTOR_ENDPOINT") ?? DEFAULT_FI_COLLECTOR_BASE_URL;
+    }
+  } else {
+    apiBaseUrl = getEnv("FI_BASE_URL") ?? getEnv("FI_COLLECTOR_ENDPOINT") ?? DEFAULT_FI_COLLECTOR_BASE_URL;
+  }
+
+  if (apiBaseUrl.endsWith('/')) {
+    apiBaseUrl = apiBaseUrl.slice(0, -1);
+  }
+  const url = `${apiBaseUrl}${FI_CUSTOM_EVAL_TEMPLATE_CHECK_PATH}`;
+
+  const headers: FIHeaders = {
+    "Content-Type": "application/json",
+    ...(getEnvFiAuthHeader() || {}),
+  };
+
+  const payload = {
+    eval_template_name: eval_template_name
+  };
+
+  if (verbose) {
+    diag.info(`checkCustomEvalTemplateExists: Checking custom eval template at ${url} with payload:`, JSON.stringify(payload, null, 2));
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      diag.error(
+        `checkCustomEvalTemplateExists: Failed to check custom eval template: ${response.status} ${response.statusText} - ${errorText}`,
+      );
+      return {
+        result: {
+          isUserEvalTemplate: false,
+          evalTemplate: null
+        }
+      };
+    }
+
+    const result = await response.json() as CheckCustomEvalTemplateExistsResponse;
+    if (verbose) {
+        diag.info("checkCustomEvalTemplateExists: Response from server:", JSON.stringify(result, null, 2));
+    }
+    return result;
+  } catch (error) {
+    diag.error(`checkCustomEvalTemplateExists: Error checking custom eval template: ${error}`);
+    return {
+      result: {
+        isUserEvalTemplate: false,
+        evalTemplate: null
+      }
+    };
+  }
+}
+
+export {
+  register,
+  FITracerProvider,
+  SimpleSpanProcessor,
+  BatchSpanProcessor,
+  HTTPSpanExporter,
+  GRPCSpanExporter,
+  UuidIdGenerator,
+  checkCustomEvalConfigExists
+}
+
+
+// TODO:
+// - Implement prepareEvalTags (similar to Python)
+// - Implement checkCustomEvalConfigExists
+// - Refine error handling and logging
+// - Add tests 
