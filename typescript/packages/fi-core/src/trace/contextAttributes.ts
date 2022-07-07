@@ -155,3 +155,71 @@ import {
   export function getUser(context: Context): User | undefined {
     const maybeUserId = context.getValue(USER_ID_KEY);
     if (typeof maybeUserId === "string") {
+      return { userId: maybeUserId };
+    }
+    return undefined;
+  }
+  
+  export function setTags(context: Context, attributes: Tags): Context {
+    return context.setValue(TAG_TAGS_KEY, safelyJSONStringify(attributes));
+  }
+  
+  export function clearTags(context: Context): Context {
+    return context.deleteValue(TAG_TAGS_KEY);
+  }
+  
+  export function getTags(context: Context): Tags | undefined {
+    const maybeTags = context.getValue(TAG_TAGS_KEY);
+    if (typeof maybeTags === "string") {
+      const parsedTags = safelyJSONParse(maybeTags);
+      return isStringArray(parsedTags) ? parsedTags : undefined;
+    }
+    return undefined;
+  }
+  
+  export function setAttributes(
+    context: Context,
+    attributes: Attributes,
+  ): Context {
+    return context.setValue(ATTRIBUTES_KEY, safelyJSONStringify(attributes));
+  }
+  
+  export function clearAttributes(context: Context): Context {
+    return context.deleteValue(ATTRIBUTES_KEY);
+  }
+  
+  export function getAttributes(context: Context): Attributes | undefined {
+    const maybeAttributes = context.getValue(ATTRIBUTES_KEY);
+    if (typeof maybeAttributes === "string") {
+      const parsedAttributes = safelyJSONParse(maybeAttributes);
+      return isAttributes(parsedAttributes) ? parsedAttributes : undefined;
+    }
+    return undefined;
+  }
+  
+  /**
+   * Gets the FI attributes from the given context
+   * @param context
+   * @example span.setAttributes(getAttributesFromContext(context.active()));
+   * @returns {Attributes} The FI attributes formatted as OpenTelemetry span attributes.
+   */
+  export function getAttributesFromContext(context: Context): Attributes {
+    let attributes: Attributes = {};
+    Object.entries(ContextAttributes).forEach(([key, symbol]) => {
+      const maybeValue = context.getValue(symbol);
+      if (key === CONTEXT_ATTRIBUTES_ATTRIBUTES_KEY) {
+        if (typeof maybeValue === "string") {
+          const parsedAttributes = safelyJSONParse(maybeValue);
+          if (isAttributes(parsedAttributes)) {
+            attributes = { ...attributes, ...parsedAttributes };
+          }
+        }
+        return;
+      }
+  
+      if (isAttributeValue(maybeValue) && maybeValue !== undefined) {
+        attributes[key] = maybeValue;
+      }
+    });
+    return attributes;
+  }
