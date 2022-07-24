@@ -79,3 +79,38 @@ export const traceConfigMetadata: Readonly<
     default: DEFAULT_HIDE_INPUT_TEXT,
     envKey: FI_HIDE_INPUT_TEXT,
     type: "boolean",
+  },
+  hideOutputText: {
+    default: DEFAULT_HIDE_OUTPUT_TEXT,
+    envKey: FI_HIDE_OUTPUT_TEXT,
+    type: "boolean",
+  },
+  hideEmbeddingVectors: {
+    default: DEFAULT_HIDE_EMBEDDING_VECTORS,
+    envKey: FI_HIDE_EMBEDDING_VECTORS,
+    type: "boolean",
+  },
+  base64ImageMaxLength: {
+    default: DEFAULT_BASE64_IMAGE_MAX_LENGTH,
+    envKey: FI_BASE64_IMAGE_MAX_LENGTH,
+    type: "number",
+  },
+  piiRedaction: {
+    default: DEFAULT_PII_REDACTION,
+    envKey: FI_PII_REDACTION,
+    type: "boolean",
+  },
+};
+
+export const DefaultTraceConfig: TraceConfig = {
+  hideInputs: DEFAULT_HIDE_INPUTS,
+  hideOutputs: DEFAULT_HIDE_OUTPUTS,
+  hideInputMessages: DEFAULT_HIDE_INPUT_MESSAGES,
+  hideOutputMessages: DEFAULT_HIDE_OUTPUT_MESSAGES,
+  hideInputImages: DEFAULT_HIDE_INPUT_IMAGES,
+  hideInputText: DEFAULT_HIDE_INPUT_TEXT,
+  hideOutputText: DEFAULT_HIDE_OUTPUT_TEXT,
+  hideEmbeddingVectors: DEFAULT_HIDE_EMBEDDING_VECTORS,
+  base64ImageMaxLength: DEFAULT_BASE64_IMAGE_MAX_LENGTH,
+  piiRedaction: DEFAULT_PII_REDACTION,
+};
