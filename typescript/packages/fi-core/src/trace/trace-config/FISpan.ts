@@ -83,3 +83,40 @@ import {
       return this;
     }
   
+    end(endTime?: TimeInput): void {
+      if (this.isEnded) {
+        diag.warn(`FISpan.end called on already ended span ID: ${this.span.spanContext().spanId}`);
+        return;
+      }
+      this.span.end(endTime);
+      this.isEnded = true;
+      // diag.debug(
+      //     `FISpan.end CALLED for span ID: ${this.span.spanContext().spanId}`
+      // );
+    }
+  
+    isRecording(): boolean {
+      return this.span.isRecording();
+    }
+  
+    recordException(exception: Exception, time?: TimeInput): void {
+      if (this.isEnded) return;
+      this.span.recordException(exception, time);
+    }
+  
+    spanContext(): SpanContext {
+      return this.span.spanContext();
+    }
+  
+    addLink(link: Link): this {
+      if (this.isEnded) return this;
+      this.span.addLink(link);
+      return this;
+    }
+  
+    addLinks(links: Link[]): this {
+      if (this.isEnded) return this;
+      this.span.addLinks(links);
+      return this;
+    }
+  }
