@@ -14,3 +14,11 @@ export {
   FI_HIDE_INPUTS,
   FI_HIDE_INPUT_IMAGES,
   FI_HIDE_INPUT_MESSAGES,
+  FI_HIDE_INPUT_TEXT,
+  FI_HIDE_OUTPUTS,
+  FI_HIDE_OUTPUT_MESSAGES,
+  FI_HIDE_OUTPUT_TEXT,
+  REDACTED_VALUE,
+} from "./constants";
+export { FITracer } from "./FITracer";
+export { type FISpan } from "./FISpan";
