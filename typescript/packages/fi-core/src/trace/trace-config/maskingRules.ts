@@ -112,3 +112,53 @@ const maskingRules: MaskingRule[] = [
     action: () => undefined,
   },
   {
+    condition: ({ config, key }) =>
+      config.hideOutputs && key === SemanticConventions.OUTPUT_VALUE,
+    action: () => REDACTED_VALUE as AttributeValue,
+  },
+  {
+    condition: ({ config, key }) =>
+      config.hideOutputs && key === SemanticConventions.OUTPUT_MIME_TYPE,
+    action: () => undefined,
+  },
+  {
+    condition: ({ config, key }) =>
+      (config.hideInputs || config.hideInputMessages) &&
+      key === SemanticConventions.LLM_INPUT_MESSAGES,
+    action: () => undefined,
+  },
+  {
+    condition: ({ config, key }) =>
+      (config.hideOutputs || config.hideOutputMessages) &&
+      key === SemanticConventions.LLM_OUTPUT_MESSAGES,
+    action: () => undefined,
+  },
+  maskInputImagesRule,
+  maskInputTextRule,
+  maskOutputTextRule,
+  maskEmbeddingVectorsRule,
+];
+
+/**
+ * A function that masks (redacts or removes) sensitive information from span attributes based on the trace config.
+ * @param config The {@link TraceConfig} to use to determine if the value should be masked
+ * @param key The key of the attribute to mask
+ * @param value The value of the attribute to mask
+ * @returns The redacted value or undefined if the value should be masked, otherwise the original value
+ */
+export function mask({
+  config,
+  key,
+  value,
+}: MaskingRuleArgs): AttributeValue | undefined {
+  for (const rule of maskingRules) {
+    if (rule.condition({ config, key, value })) {
+      return rule.action({ config, key, value });
+    }
+  }
+  // No key-based rule matched — apply PII redaction if enabled
+  if (config.piiRedaction && value != null) {
+    return redactPiiInValue(value);
+  }
+  return value;
+}
