@@ -53,3 +53,27 @@ export function redactPiiInString(text: string): string {
   let result = text;
   for (const { regex, replacement } of PII_PATTERNS) {
     regex.lastIndex = 0;
+    result = result.replace(regex, replacement);
+  }
+  return result;
+}
+
+/**
+ * Apply PII redaction to `value`.
+ *
+ * Handles:
+ * - `string` — scanned directly.
+ * - `string[]` — each element scanned.
+ * - Anything else — returned as-is.
+ */
+export function redactPiiInValue<T>(value: T): T {
+  if (typeof value === "string") {
+    return redactPiiInString(value) as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      typeof item === "string" ? redactPiiInString(item) : item,
+    ) as T;
+  }
+  return value;
+}
