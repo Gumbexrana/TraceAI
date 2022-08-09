@@ -45,3 +45,24 @@ function parseOption({
 /**
  * Generates a full trace config object based on passed in options, environment variables, and default values.
  * The order of precedence is: optionValue > envValue > defaultValue
+ * @param options - The user provided TraceConfigOptions.
+ * @returns A full TraceConfig object with all options set to their final values.
+ */
+export function generateTraceConfig(options?: TraceConfigOptions): TraceConfig {
+  if (options == null) {
+    return DefaultTraceConfig;
+  }
+  return Object.entries(traceConfigMetadata).reduce(
+    (config, [key, optionMetadata]) => {
+      const TraceConfigKey = key as TraceConfigKey;
+      return {
+        ...config,
+        [TraceConfigKey]: parseOption({
+          optionValue: options[TraceConfigKey],
+          optionMetadata,
+        }),
+      };
+    },
+    {} as TraceConfig,
+  );
+}
