@@ -83,3 +83,40 @@ export type MaskingRuleArgs = {
    * The key of the attribute to mask
    */
   key: string;
+  /**
+   * The value of the attribute to mask
+   */
+  value?: AttributeValue;
+};
+
+/**
+ * A condition to determine if a value should be masked
+ * and an action that masks (removes or redacts) the value if the condition is met
+ *   @example
+ * ```typescript
+ *  const config = {hideInputText: true}
+ *  const key = "gen_ai.input.messages"
+ *  if (maskInputTextRule.condition({ config, key })) {
+ *    return maskInputTextRule.action({ config, key, value })
+ *  }
+ * ```
+ */
+export type MaskingRule = {
+  /**
+   *
+   * @param args The {@linkcode MaskingRuleArgs} to determine if the value should be masked
+   * @returns true if the value should be masked, false otherwise
+   */
+  condition: (args: MaskingRuleArgs) => boolean;
+  /**
+   * An action to be applied if the condition is met
+   * @param args The {@linkcode MaskingRuleArgs} to determine how the value should be masked
+   * @returns A redacted value or undefined
+   */
+  action: (args: MaskingRuleArgs) => AttributeValue | undefined;
+};
+
+/**
+ * A callback that is called when a new active {@link FISpan} is created
+ */
+export type FIActiveSpanCallback = (span: FISpan) => void;
