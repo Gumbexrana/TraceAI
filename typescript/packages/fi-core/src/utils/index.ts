@@ -19,3 +19,12 @@ export function withSafety<T extends GenericFunction>({
     } catch (error) {
       if (onError) {
         onError(error);
+      }
+      return null;
+    }
+  };
+}
+
+export const safelyJSONStringify = withSafety({ fn: JSON.stringify });
+
+export const safelyJSONParse = withSafety({ fn: JSON.parse });
