@@ -324,3 +324,143 @@ describe('FI Core - OTEL Module', () => {
     it('should return true when config exists', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        json: async () => ({
+          result: { exists: true },
+        }),
+      } as Response);
+
+      const result = await checkCustomEvalConfigExists(
+        mockProjectName,
+        mockEvalTags
+      );
+
+      expect(result).toBe(true);
+      expect(mockFetch).toHaveBeenCalled();
+    });
+
+    it('should return false when config does not exist', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: { exists: false },
+        }),
+      } as Response);
+
+      const result = await checkCustomEvalConfigExists(
+        mockProjectName,
+        mockEvalTags
+      );
+
+      expect(result).toBe(false);
+    });
+
+    it('should handle API errors gracefully', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      } as Response);
+
+      const result = await checkCustomEvalConfigExists(
+        mockProjectName,
+        mockEvalTags
+      );
+
+      expect(result).toBe(false);
+    });
+
+    it('should handle network errors', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+      const result = await checkCustomEvalConfigExists(
+        mockProjectName,
+        mockEvalTags
+      );
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('checkCustomEvalTemplateExists', () => {
+    const mockTemplateName = 'test-template';
+
+    it('should return template when it exists', async () => {
+      const mockTemplate = {
+        name: 'test-template',
+        config: { key: 'value' },
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: {
+            isUserEvalTemplate: true,
+            evalTemplate: mockTemplate,
+          },
+        }),
+      } as Response);
+
+      const result = await checkCustomEvalTemplateExists(mockTemplateName);
+
+      expect(result.result?.isUserEvalTemplate).toBe(true);
+      expect(result.result?.evalTemplate).toEqual(mockTemplate);
+    });
+
+    it('should handle template not found', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: {
+            isUserEvalTemplate: false,
+            evalTemplate: null,
+          },
+        }),
+      } as Response);
+
+      const result = await checkCustomEvalTemplateExists(mockTemplateName);
+
+      expect(result.result?.isUserEvalTemplate).toBe(false);
+    });
+
+    it('should handle API errors', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+      } as Response);
+
+      const result = await checkCustomEvalTemplateExists(mockTemplateName);
+
+      expect(result.result?.isUserEvalTemplate).toBe(false);
+    });
+  });
+
+  describe('Environment Variable Handling', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      jest.resetModules();
+      process.env = { ...originalEnv };
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+    });
+
+    it('should use default endpoints when env vars not set', () => {
+      delete process.env.FI_COLLECTOR_BASE_URL;
+      delete process.env.FI_GRPC_COLLECTOR_BASE_URL;
+
+      const provider = new FITracerProvider();
+      expect(provider).toBeDefined();
+    });
+
+    it('should use custom endpoints from env vars', () => {
+      process.env.FI_COLLECTOR_BASE_URL = 'https://custom-http.example.com';
+      process.env.FI_GRPC_COLLECTOR_BASE_URL = 'https://custom-grpc.example.com:50051';
+
+      const provider = new FITracerProvider();
+      expect(provider).toBeDefined();
+    });
+  });
+}); 
