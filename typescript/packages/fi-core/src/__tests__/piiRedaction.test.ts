@@ -91,3 +91,43 @@ describe("redactPiiInString", () => {
   });
 
   it("works correctly when called multiple times (global regex reset)", () => {
+    // Regression: global regexes must reset lastIndex between calls
+    expect(redactPiiInString("a@b.com")).toBe("<EMAIL_ADDRESS>");
+    expect(redactPiiInString("c@d.com")).toBe("<EMAIL_ADDRESS>");
+    expect(redactPiiInString("e@f.com")).toBe("<EMAIL_ADDRESS>");
+  });
+});
+
+describe("redactPiiInValue", () => {
+  it("redacts strings", () => {
+    expect(redactPiiInValue("Email: test@example.com")).toBe(
+      "Email: <EMAIL_ADDRESS>",
+    );
+  });
+
+  it("redacts arrays of strings", () => {
+    expect(
+      redactPiiInValue(["test@a.com", "no pii here", "192.168.1.1"]),
+    ).toEqual(["<EMAIL_ADDRESS>", "no pii here", "<IP_ADDRESS>"]);
+  });
+
+  it("passes through numbers", () => {
+    expect(redactPiiInValue(42)).toBe(42);
+  });
+
+  it("passes through booleans", () => {
+    expect(redactPiiInValue(true)).toBe(true);
+  });
+
+  it("passes through undefined", () => {
+    expect(redactPiiInValue(undefined)).toBeUndefined();
+  });
+
+  it("handles arrays with mixed types", () => {
+    expect(redactPiiInValue(["test@a.com", 42, true])).toEqual([
+      "<EMAIL_ADDRESS>",
+      42,
+      true,
+    ]);
+  });
+});
