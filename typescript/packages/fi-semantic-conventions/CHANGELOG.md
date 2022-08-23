@@ -16,3 +16,12 @@
 
 ## [0.1.4] - 2025-05-23
 ### Feature
+- Dependencies Updated
+
+## [0.1.1] - 2025-05-20
+### Feature
+- Dependencies Updated
+
+## [0.1.0] - 2025-05-20
+### Feature
+- Initial Release
