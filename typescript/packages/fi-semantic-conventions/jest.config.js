@@ -12,3 +12,9 @@ module.exports = {
     '!src/index.ts'
   ],
   coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'lcov'],
+  transform: {
+    '^.+\\.ts$': 'ts-jest'
+  },
+  testTimeout: 10000
+}; 
