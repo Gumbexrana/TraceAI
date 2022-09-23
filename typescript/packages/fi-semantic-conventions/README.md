@@ -170,3 +170,77 @@ import {
 const tracer = trace.getTracer('my-app');
 
 // Create a span with semantic attributes
+const span = tracer.startSpan('llm.chat');
+
+// Set attributes using conventions
+span.setAttributes({
+    [`${SemanticAttributePrefixes.llm}.${LLMAttributePostfixes.system}`]: 'openai',
+    [`${SemanticAttributePrefixes.llm}.${LLMAttributePostfixes.model_name}`]: 'gpt-4',
+    [`${SemanticAttributePrefixes.llm}.${LLMAttributePostfixes.token_count}.prompt`]: 100,
+    [`${SemanticAttributePrefixes.llm}.${LLMAttributePostfixes.token_count}.completion`]: 50,
+    [`${SemanticAttributePrefixes.input}.value`]: 'User input text',
+    [`${SemanticAttributePrefixes.output}.value`]: 'Model response',
+});
+
+span.end();
+```
+
+## Span Kind Attribute
+
+The `fi.span_kind` attribute indicates the type of operation:
+
+```typescript
+// Set span kind
+span.setAttribute('fi.span_kind', 'LLM');
+```
+
+| Value | Description |
+|-------|-------------|
+| `LLM` | Language model call |
+| `AGENT` | Agent orchestration |
+| `TOOL` | Tool/function execution |
+| `CHAIN` | Workflow chain |
+| `RETRIEVER` | Document retrieval |
+| `EMBEDDING` | Embedding generation |
+| `RERANKER` | Result reranking |
+| `GUARDRAIL` | Safety check |
+| `VECTOR_DB` | Vector database operation |
+
+## Resource Attributes
+
+```typescript
+import { ResourceAttributes } from '@traceai/fi-semantic-conventions';
+```
+
+Standard OpenTelemetry resource attributes for service identification:
+
+| Attribute | Description |
+|-----------|-------------|
+| `service.name` | Service name |
+| `service.version` | Service version |
+| `deployment.environment` | Deployment environment |
+
+## TypeScript Configuration
+
+For optimal compatibility:
+
+```json
+{
+  "compilerOptions": {
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true
+  }
+}
+```
+
+## Related Packages
+
+- `@traceai/fi-core` - Core tracing library
+- `@traceai/openai` - OpenAI instrumentation
+- `@traceai/anthropic` - Anthropic instrumentation
+- `@traceai/langchain` - LangChain instrumentation
+
+## License
+
+GPL-3.0
