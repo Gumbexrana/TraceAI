@@ -160,3 +160,73 @@ describe('Semantic Conventions Package Integration', () => {
         });
       });
     });
+
+    it('should have consistent enum structures', () => {
+      const enums = [FISpanKind, MimeType, LLMSystem, LLMProvider];
+
+      enums.forEach(enumObj => {
+        expect(typeof enumObj).toBe('object');
+        expect(enumObj).not.toBeNull();
+        expect(Object.keys(enumObj).length).toBeGreaterThan(0);
+        
+        Object.values(enumObj).forEach(value => {
+          expect(typeof value).toBe('string');
+          expect(value.length).toBeGreaterThan(0);
+        });
+      });
+    });
+  });
+
+  describe('Import Performance', () => {
+    it('should import quickly', () => {
+      const start = process.hrtime.bigint();
+      require('../index');
+      const end = process.hrtime.bigint();
+      
+      const durationMs = Number(end - start) / 1_000_000;
+      expect(durationMs).toBeLessThan(50); // Less than 50ms
+    });
+
+    it('should not cause memory leaks on repeated imports', () => {
+      const initialMemory = process.memoryUsage().heapUsed;
+      
+      // Import multiple times
+      for (let i = 0; i < 5; i++) {
+        delete require.cache[require.resolve('../index')];
+        require('../index');
+      }
+      
+      // Force garbage collection if available
+      if (global.gc) {
+        global.gc();
+      }
+      
+      const finalMemory = process.memoryUsage().heapUsed;
+      const memoryIncrease = finalMemory - initialMemory;
+      
+      // Should not increase memory by more than 500KB
+      expect(memoryIncrease).toBeLessThan(500 * 1024);
+    });
+  });
+
+  describe('Module Isolation', () => {
+    it('should work with ES6 and CommonJS imports', () => {
+      // Test CommonJS require
+      expect(() => {
+        const cjsImport = require('../index');
+        expect(cjsImport.INPUT_VALUE).toBeDefined();
+      }).not.toThrow();
+
+      // Test ES6 import (already tested above with import statements)
+      expect(INPUT_VALUE).toBeDefined();
+    });
+
+    it('should maintain referential integrity across imports', () => {
+      const import1 = require('../index');
+      const import2 = require('../index');
+      
+      expect(import1.INPUT_VALUE).toBe(import2.INPUT_VALUE);
+      expect(import1.FISpanKind).toBe(import2.FISpanKind);
+    });
+  });
+}); 
