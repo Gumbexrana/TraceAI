@@ -37,3 +37,21 @@ describe('Resource Attributes', () => {
       const attributes = [ATTR_PROJECT_NAME, ATTR_SERVICE_NAME];
       const uniqueAttributes = new Set(attributes);
       expect(uniqueAttributes.size).toBe(attributes.length);
+    });
+
+    it('should all be strings', () => {
+      const attributes = [ATTR_PROJECT_NAME, ATTR_SERVICE_NAME];
+      attributes.forEach(attr => {
+        expect(typeof attr).toBe('string');
+      });
+    });
+
+    it('should all be non-empty', () => {
+      const attributes = [ATTR_PROJECT_NAME, ATTR_SERVICE_NAME];
+      attributes.forEach(attr => {
+        expect(attr.length).toBeGreaterThan(0);
+        expect(attr.trim()).toBe(attr); // No leading/trailing whitespace
+      });
+    });
+  });
+}); 
