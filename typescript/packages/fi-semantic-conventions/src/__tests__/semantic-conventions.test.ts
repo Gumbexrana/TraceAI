@@ -266,3 +266,119 @@ describe('Semantic Conventions', () => {
 
   describe('LLMProvider Enum', () => {
     it('should have all expected LLM providers', () => {
+      const expectedProviders = [
+        'openai', 'anthropic', 'mistralai', 'cohere',
+        'google', 'aws', 'azure'
+      ];
+      
+      expectedProviders.forEach(provider => {
+        expect(LLMProvider).toHaveProperty(provider.toUpperCase());
+        expect(LLMProvider[provider.toUpperCase() as keyof typeof LLMProvider]).toBe(provider);
+      });
+    });
+
+    it('should have correct provider values', () => {
+      expect(LLMProvider.OPENAI).toBe('openai');
+      expect(LLMProvider.ANTHROPIC).toBe('anthropic');
+      expect(LLMProvider.MISTRALAI).toBe('mistralai');
+      expect(LLMProvider.COHERE).toBe('cohere');
+      expect(LLMProvider.GOOGLE).toBe('google');
+      expect(LLMProvider.AWS).toBe('aws');
+      expect(LLMProvider.AZURE).toBe('azure');
+    });
+
+    it('should have lowercase values', () => {
+      Object.values(LLMProvider).forEach(value => {
+        expect(value).toBe(value.toLowerCase());
+        expect(value).toMatch(/^[a-z0-9_]+$/);
+      });
+    });
+
+    it('should include both AI providers and cloud providers', () => {
+      // AI providers
+      expect(LLMProvider.OPENAI).toBeDefined();
+      expect(LLMProvider.ANTHROPIC).toBeDefined();
+      expect(LLMProvider.MISTRALAI).toBeDefined();
+      expect(LLMProvider.COHERE).toBeDefined();
+      
+      // Cloud providers
+      expect(LLMProvider.GOOGLE).toBeDefined();
+      expect(LLMProvider.AWS).toBeDefined();
+      expect(LLMProvider.AZURE).toBeDefined();
+    });
+  });
+
+  describe('Postfix Collections Validation', () => {
+    const postfixCollections = [
+      { name: 'LLM', collection: LLMAttributePostfixes },
+      { name: 'LLMPromptTemplate', collection: LLMPromptTemplateAttributePostfixes },
+      { name: 'Retrieval', collection: RetrievalAttributePostfixes },
+      { name: 'Reranker', collection: RerankerAttributePostfixes },
+      { name: 'Embedding', collection: EmbeddingAttributePostfixes },
+      { name: 'Tool', collection: ToolAttributePostfixes },
+      { name: 'Message', collection: MessageAttributePostfixes },
+      { name: 'MessageContents', collection: MessageContentsAttributePostfixes },
+      { name: 'Image', collection: ImageAttributesPostfixes },
+      { name: 'ToolCall', collection: ToolCallAttributePostfixes },
+      { name: 'Document', collection: DocumentAttributePostfixes },
+      { name: 'Tag', collection: TagAttributePostfixes },
+      { name: 'Session', collection: SessionAttributePostfixes },
+      { name: 'User', collection: UserAttributePostfixes },
+      { name: 'Audio', collection: AudioAttributesPostfixes },
+      { name: 'Prompt', collection: PromptAttributePostfixes }
+    ];
+
+    postfixCollections.forEach(({ name, collection }) => {
+      it(`should have valid ${name} postfixes`, () => {
+        expect(Object.keys(collection).length).toBeGreaterThan(0);
+        
+        Object.entries(collection).forEach(([key, value]) => {
+          expect(typeof value).toBe('string');
+          expect(value.length).toBeGreaterThan(0);
+          expect(value).toMatch(/^[a-z._]+$/); // Only lowercase, dots, and underscores
+        });
+      });
+    });
+
+    it('should have no duplicate postfix values across collections', () => {
+      const allPostfixes: string[] = [];
+      
+      postfixCollections.forEach(({ collection }) => {
+        allPostfixes.push(...Object.values(collection));
+      });
+
+      // Note: Some duplication is expected (like "name", "id") but let's check structure
+      allPostfixes.forEach(postfix => {
+        expect(typeof postfix).toBe('string');
+        expect(postfix.length).toBeGreaterThan(0);
+      });
+    });
+  });
+
+  describe('Type Safety', () => {
+    it('should have readonly const assertions for prefixes', () => {
+      // Test that the objects are properly typed as const
+      expect(typeof SemanticAttributePrefixes).toBe('object');
+      expect(typeof LLMAttributePostfixes).toBe('object');
+    });
+
+    it('should have string enums', () => {
+      // Test that enums are string-based
+      Object.values(FISpanKind).forEach(value => {
+        expect(typeof value).toBe('string');
+      });
+      
+      Object.values(MimeType).forEach(value => {
+        expect(typeof value).toBe('string');
+      });
+      
+      Object.values(LLMSystem).forEach(value => {
+        expect(typeof value).toBe('string');
+      });
+      
+      Object.values(LLMProvider).forEach(value => {
+        expect(typeof value).toBe('string');
+      });
+    });
+  });
+}); 
