@@ -45,3 +45,24 @@
   "peerDependencies": {
     "@anthropic-ai/sdk": "^0.27.3"
   },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "@types/jest": "^29.5.12",
+    "@anthropic-ai/sdk": "^0.27.3",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.4",
+    "rimraf": "^6.0.1",
+    "tsc-alias": "^1.8.16",
+    "typescript": "^5.8.3"
+  },
+  "keywords": [
+    "opentelemetry",
+    "instrumentation",
+    "typescript",
+    "anthropic"
+  ],
+  "author": "Future AGI <no-reply@futureagi.com>",
+  "publishConfig": {
+    "access": "public"
+  }
+}
