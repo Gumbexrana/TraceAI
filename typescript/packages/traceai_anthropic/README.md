@@ -97,3 +97,46 @@ try {
 
 The following environment variables are required:
 
+```bash
+# For Anthropic API
+ANTHROPIC_API_KEY=your_anthropic_api_key
+
+# For TraceAI telemetry
+FI_API_KEY=your_api_key
+FI_SECRET_KEY=your_secret_key
+```
+
+## Features
+
+- Automatic tracing of Anthropic API calls
+- Support for both streaming and non-streaming requests
+- Captures token usage and response metadata
+- Tracks tool usage in conversations
+- No manual instrumentation required
+- Integration with TraceAI's observability platform
+
+## Peer Dependencies
+
+This package requires the following peer dependency:
+- `@anthropic-ai/sdk`: ^0.27.3
+
+## Development
+
+```bash
+# Install dependencies
+pnpm install
+
+# Build the package
+pnpm build
+
+# Run tests
+pnpm test
+
+# Type checking
+pnpm type:check
+```
+
+## Support
+
+For support, please open an issue in our [GitHub repository](https://github.com/future-agi/traceAI/issues).
+
