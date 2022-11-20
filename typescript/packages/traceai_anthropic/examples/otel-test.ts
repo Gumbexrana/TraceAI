@@ -135,3 +135,62 @@ async function main() {
     const finalMessageTC4 = await streamTC4.finalMessage();
     console.log("\n--- Stream ended (TC4 finalMessage received) ---");
     if (finalMessageTC4.usage) {
+        console.log(`Usage (streaming TC4): Input: ${finalMessageTC4.usage.input_tokens}, Output: ${finalMessageTC4.usage.output_tokens}`);
+    }
+    console.log("Final accumulated text (TC4 from .on('text')):", accumulatedTextTC4);
+
+
+    // === Test Case 5: Streaming with Tool Use (reverted to manual iteration) ===
+    console.log("\n--- Test Case 5: Streaming with Tool Use (manual iteration) ---");
+    const streamTC5 = client.messages.stream({
+        model: "claude-3-haiku-20240307",
+        max_tokens: 200,
+        tools: dummyTools,
+        messages: [{ role: "user", content: "What is the current price of GOOG stock?" }],
+    });
+    
+    console.log("\nStreaming response content (TC5 - will print as it arrives):");
+    let accumulatedTextTC5 = "";
+
+    streamTC5.on('text', (textChunk) => {
+        process.stdout.write(textChunk);
+        accumulatedTextTC5 += textChunk;
+    });
+
+    const finalMessageTC5 = await streamTC5.finalMessage();
+    console.log("\n--- Stream ended (TC5 finalMessage received) ---");
+
+    if (finalMessageTC5.usage) {
+        console.log(`Usage (streaming TC5): Input: ${finalMessageTC5.usage.input_tokens}, Output: ${finalMessageTC5.usage.output_tokens}`);
+    }
+    console.log("Final accumulated text (TC5 from .on('text')):", accumulatedTextTC5);
+    
+    const detectedToolUsesTC5 = finalMessageTC5.content.filter(
+        (block): block is AnthropicSDK.ToolUseBlock => block.type === 'tool_use'
+    );
+
+    if (detectedToolUsesTC5.length > 0) {
+        console.log("Detected tool uses in stream (TC5 from finalMessage):");
+        detectedToolUsesTC5.forEach(toolUse => {
+            console.log(`  Tool: ID=${toolUse.id}, Name=${toolUse.name}, Input:`, toolUse.input);
+        });
+    }
+
+    console.log("\n--- All Test Cases Completed ---");
+
+  } catch (error) {
+    console.error("Error during Anthropic API call tests:", error);
+  } finally {
+    console.log("\nShutting down OpenTelemetry provider in 5 seconds...");
+    setTimeout(() => {
+        tracerProvider.shutdown()
+        .then(() => console.log("OpenTelemetry provider shutdown complete."))
+        .catch((shutdownError: Error) => console.error("Error shutting down OpenTelemetry provider:", shutdownError.message));
+    }, 5000); 
+  }
+}
+
+main().catch((error) => {
+  console.error("Unhandled error in main function:", error);
+  process.exit(1);
+});
