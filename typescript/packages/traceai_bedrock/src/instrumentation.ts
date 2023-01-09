@@ -326,3 +326,144 @@ export class BedrockInstrumentation extends InstrumentationBase {
     });
 
     const modelId = command.input.modelId;
+    const system = getSystemFromModelId(modelId ?? "");
+    setBasicSpanAttributes(span, system);
+
+    const contextAttributes = getAttributesFromContext(context.active());
+    span.setAttributes(contextAttributes);
+
+    extractInvokeModelRequestAttributes({
+      span,
+      command: command as unknown as InvokeModelCommand,
+      system,
+    });
+
+    // Execute AWS SDK call and handle stream splitting outside error boundaries
+    // This ensures the user stream is ALWAYS returned, regardless of instrumentation failures
+    const result = original.apply(client, [command]) as Promise<{
+      body: AsyncIterable<unknown>;
+    }>;
+
+    return result
+      .then((response: { body: AsyncIterable<unknown> }) => {
+        // Guard against missing response body - return original response
+        if (!response.body) {
+          span.recordException(new Error("Response body is undefined"));
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: "Response body is undefined",
+          });
+          span.end();
+          return response;
+        }
+
+        const { instrumentationStream, userStream } = safelySplitStream({
+          originalStream: response.body,
+        });
+
+        // Start background instrumentation processing (non-blocking)
+        // Only the instrumentation is wrapped in error handling - the user stream is protected
+        if (instrumentationStream) {
+          // @ts-expect-error - instrumentationStream is guaranteed non-null by the if check above
+          consumeBedrockStreamChunks({
+            stream: instrumentationStream,
+            span,
+            modelType: system,
+          })
+            .then(() => {
+              span.setStatus({ code: SpanStatusCode.OK });
+              span.end();
+            })
+            .catch((error: Error) => {
+              span.recordException(error);
+              span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: error.message,
+              });
+              span.end();
+            });
+        } else {
+          // No instrumentation stream available, end span cleanly
+          span.setStatus({ code: SpanStatusCode.OK });
+          span.end();
+        }
+
+        // Return user stream immediately - instrumentation cannot interfere
+        return { ...response, body: userStream };
+      })
+      .catch((error: Error) => {
+        // If the AWS SDK call itself fails, record error but still try to return original response
+        span.recordException(error);
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: error.message,
+        });
+        span.end();
+        throw error; // Re-throw since we have no stream to return
+      });
+  }
+
+  /**
+   * Handles instrumentation for Converse API commands
+   * Creates a span, extracts request attributes, executes the command, and processes the response
+   *
+   * @param command The ConverseCommand to instrument
+   * @param original The original send method from the Bedrock client
+   * @param client The Bedrock client instance
+   * @returns {Promise<ConverseResponse>} The response from the Converse call
+   */
+  private handleConverseCommand(
+    command: ConverseCommand,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    original: any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    client: any,
+  ): Promise<ConverseResponse> {
+    const span = this.fiTracer.startSpan("bedrock.converse", {
+      kind: SpanKind.INTERNAL,
+    });
+
+    const modelId = command.input.modelId;
+    const system = getSystemFromModelId(modelId ?? "");
+    setBasicSpanAttributes(span, system);
+
+    const contextAttributes = getAttributesFromContext(context.active());
+    span.setAttributes(contextAttributes);
+
+    extractConverseRequestAttributes({ span, command });
+
+    try {
+      const result = original.apply(client, [
+        command,
+      ]) as Promise<ConverseResponse>;
+
+      // AWS SDK v3 send() method always returns a Promise
+      return result
+        .then((response: ConverseResponse) => {
+          extractConverseResponseAttributes({ span, response });
+          span.setStatus({ code: SpanStatusCode.OK });
+          span.end();
+          return response;
+        })
+        .catch((error: Error) => {
+          span.recordException(error);
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: error.message,
+          });
+          span.end();
+          throw error;
+        });
+    } catch (error) {
+      // Handle errors that occur before the Promise is returned (e.g. invalid parameters)
+      if (error instanceof Error) {
+        span.recordException(error);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      } else {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+      }
+      span.end();
+      throw error;
+    }
+  }
+}
