@@ -187,3 +187,84 @@ export function processMessages({
   messages: Message[];
   baseKey:
     | typeof SemanticConventions.LLM_INPUT_MESSAGES
+    | typeof SemanticConventions.LLM_OUTPUT_MESSAGES;
+}): void {
+  const serialized = messages.map((msg) => serializeMessage(msg));
+  setSpanAttribute(span, baseKey, safelyJSONStringify(serialized) ?? "[]");
+}
+
+// --- Legacy functions kept for backward compatibility with invoke-model paths ---
+
+/**
+ * @deprecated Use serializeMessageContent instead
+ */
+export function getAttributesFromMessageContent(
+  content: ContentBlock,
+): Attributes {
+  const attributes: Attributes = {};
+  if (isConverseTextContent(content)) {
+    attributes[SemanticConventions.MESSAGE_CONTENT_TYPE] = "text";
+    attributes[SemanticConventions.MESSAGE_CONTENT_TEXT] = content.text;
+  } else if (isConverseImageContent(content)) {
+    attributes[SemanticConventions.MESSAGE_CONTENT_TYPE] = "image";
+    if (content.image.source.bytes) {
+      const base64 = Buffer.from(content.image.source.bytes).toString("base64");
+      const mimeType = `image/${content.image.format}`;
+      attributes[
+        `${SemanticConventions.MESSAGE_CONTENT_IMAGE}.${SemanticConventions.IMAGE_URL}`
+      ] = formatImageUrl({ type: "base64", data: base64, media_type: mimeType });
+    }
+  }
+  return attributes;
+}
+
+/**
+ * @deprecated Use serializeMessage instead
+ */
+export function getAttributesFromMessage(message: Message): Attributes {
+  const attributes: Attributes = {};
+  if (message.role) {
+    attributes[SemanticConventions.MESSAGE_ROLE] = message.role;
+  }
+  if (message.content) {
+    let toolCallIndex = 0;
+    for (const [index, content] of message.content.entries()) {
+      const contentAttributes = getAttributesFromMessageContent(content);
+      for (const [key, value] of Object.entries(contentAttributes)) {
+        attributes[`${SemanticConventions.MESSAGE_CONTENTS}.${index}.${key}`] = value as AttributeValue;
+      }
+      if (isConverseToolUseContent(content)) {
+        const toolCallPrefix = `${SemanticConventions.MESSAGE_TOOL_CALLS}.${toolCallIndex}`;
+        attributes[`${toolCallPrefix}.${SemanticConventions.TOOL_CALL_ID}`] = content.toolUse.toolUseId;
+        attributes[`${toolCallPrefix}.${SemanticConventions.TOOL_CALL_FUNCTION_NAME}`] = content.toolUse.name;
+        attributes[`${toolCallPrefix}.${SemanticConventions.TOOL_CALL_FUNCTION_ARGUMENTS_JSON}`] = JSON.stringify(content.toolUse.input);
+        toolCallIndex++;
+      } else if (isConverseToolResultContent(content)) {
+        attributes[SemanticConventions.MESSAGE_TOOL_CALL_ID] = content.toolResult.toolUseId;
+      }
+    }
+  }
+  return attributes;
+}
+
+/**
+ * Extracts clean model name from full Bedrock model ID
+ * Removes vendor prefix and version suffixes to get the base model name
+ *
+ * @param modelId The full Bedrock model identifier
+ * @returns {string} The cleaned model name (e.g., "claude-3-sonnet" from "anthropic.claude-3-sonnet-20240229-v1:0")
+ */
+export function extractModelName(modelId: string): string {
+  const parts = modelId.split(".");
+  if (parts.length > 1) {
+    const modelPart = parts[1];
+    if (modelId.includes("anthropic")) {
+      const versionIndex = modelPart.indexOf("-v");
+      if (versionIndex > 0) {
+        return modelPart.substring(0, versionIndex);
+      }
+    }
+    return modelPart;
+  }
+  return modelId;
+}
