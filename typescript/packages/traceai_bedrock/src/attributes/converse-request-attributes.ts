@@ -112,3 +112,52 @@ function extractInputMessagesAttributes({
  * Extracts tool configuration attributes from Converse request
  * Processes tool definitions and sets them as JSON schema attributes
  *
+ * @param params Object containing extraction parameters
+ * @param params.span The OpenTelemetry span to set attributes on
+ * @param params.input The ConverseRequest containing tool configuration
+ */
+function extractInputToolAttributes({
+  span,
+  input,
+}: {
+  span: Span;
+  input: ConverseRequest;
+}): void {
+  const toolConfig: ToolConfiguration | undefined = input.toolConfig;
+  if (!toolConfig?.tools || toolConfig.tools.length === 0) return;
+
+  setSpanAttribute(
+    span,
+    SemanticConventions.LLM_TOOLS,
+    safelyJSONStringify(toolConfig.tools) ?? "[]",
+  );
+}
+
+/**
+ * Extracts semantic convention attributes from Converse command and sets them on the span
+ * Main entry point for processing Converse API requests with comprehensive error handling
+ *
+ * Processes:
+ * - Base model and system attributes
+ * - Input messages with system prompt aggregation
+ * - Tool configuration definitions
+ *
+ * @param params Object containing extraction parameters
+ * @param params.span The OpenTelemetry span to set attributes on
+ * @param params.command The ConverseCommand to extract attributes from
+ */
+export const extractConverseRequestAttributes = withSafety({
+  fn: ({ span, command }: { span: Span; command: ConverseCommand }): void => {
+    const input = command.input;
+    if (!input || !isConverseRequest(input)) {
+      return;
+    }
+
+    extractBaseRequestAttributes({ span, input });
+    extractInputMessagesAttributes({ span, input });
+    extractInputToolAttributes({ span, input });
+  },
+  onError: (error) => {
+    diag.warn("Error extracting Converse request attributes:", error);
+  },
+});
