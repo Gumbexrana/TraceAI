@@ -56,3 +56,28 @@ export const extractConverseResponseAttributes = withSafety({
           response.usage.outputTokens,
         );
       }
+      if (
+        response.usage.inputTokens != null &&
+        response.usage.outputTokens != null
+      ) {
+        setSpanAttribute(
+          span,
+          SemanticConventions.LLM_TOKEN_COUNT_TOTAL,
+          response.usage.inputTokens + response.usage.outputTokens,
+        );
+      }
+    }
+
+    // Extract response model if available
+    if (response.metrics) {
+      setSpanAttribute(
+        span,
+        SemanticConventions.RAW_OUTPUT,
+        safelyJSONStringify(response) ?? "",
+      );
+    }
+  },
+  onError: (error) => {
+    diag.warn("Error extracting Converse response attributes:", error);
+  },
+});
