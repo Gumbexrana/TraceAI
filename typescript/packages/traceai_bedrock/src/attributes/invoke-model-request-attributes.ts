@@ -134,3 +134,62 @@ function extractInputToolAttributes({
   system,
 }: {
   span: Span;
+  requestBody: InvokeModelRequestBody;
+  system: LLMSystem;
+}): void {
+  let tools: unknown[] | undefined;
+
+  if (
+    system === LLMSystem.AMAZON &&
+    requestBody.toolConfig &&
+    isObjectWithStringKeys(requestBody.toolConfig) &&
+    requestBody.toolConfig.tools &&
+    Array.isArray(requestBody.toolConfig.tools)
+  ) {
+    tools = requestBody.toolConfig.tools;
+  } else if (requestBody.tools && Array.isArray(requestBody.tools)) {
+    tools = requestBody.tools;
+  }
+
+  if (tools && tools.length > 0) {
+    setSpanAttribute(span, SemanticConventions.LLM_TOOLS, safelyJSONStringify(tools) ?? "[]");
+  }
+}
+
+/**
+ * Extracts semantic convention attributes from InvokeModel request command
+ * Main entry point for processing InvokeModel API requests with comprehensive error handling
+ *
+ * Processes:
+ * - Request body parsing from multiple formats
+ * - Base model and system attributes
+ * - Input messages with multi-modal content
+ * - Tool definitions
+ *
+ * @param params Object containing extraction parameters
+ * @param params.span The OpenTelemetry span to set attributes on
+ * @param params.command The InvokeModelCommand to extract attributes from
+ */
+export const extractInvokeModelRequestAttributes = withSafety({
+  fn: ({
+    span,
+    command,
+    system,
+  }: {
+    span: Span;
+    command: InvokeModelCommand;
+    system: LLMSystem;
+  }): void => {
+    const requestBody = parseRequestBody(command);
+    if (!requestBody) {
+      return;
+    }
+
+    extractBaseRequestAttributes({ span, command, requestBody, system });
+    extractInputMessagesAttributes({ span, requestBody, system });
+    extractInputToolAttributes({ span, requestBody, system });
+  },
+  onError: (error) => {
+    diag.warn("Error extracting InvokeModel request attributes:", error);
+  },
+});
