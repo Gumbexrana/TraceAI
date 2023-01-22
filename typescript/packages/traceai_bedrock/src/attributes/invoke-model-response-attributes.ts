@@ -110,3 +110,52 @@ export const extractInvokeModelResponseAttributes = withSafety({
     // Extract and set output messages
     const message = normalizeResponseContentBlocks(responseBody, system);
     if (message) {
+      const serialized = serializeBedrockMessage(message as BedrockMessage);
+      setSpanAttribute(
+        span,
+        SemanticConventions.LLM_OUTPUT_MESSAGES,
+        safelyJSONStringify([serialized]) ?? "[]",
+      );
+    }
+
+    // Extract and set token usage
+    const usage = normalizeUsageAttributes(responseBody, system);
+    if (usage) {
+      const usageObj = usage as Record<string, unknown>;
+      if (usageObj.input_tokens != null) {
+        setSpanAttribute(
+          span,
+          SemanticConventions.LLM_TOKEN_COUNT_PROMPT,
+          usageObj.input_tokens as number,
+        );
+      }
+      if (usageObj.output_tokens != null) {
+        setSpanAttribute(
+          span,
+          SemanticConventions.LLM_TOKEN_COUNT_COMPLETION,
+          usageObj.output_tokens as number,
+        );
+      }
+      if (usageObj.total_tokens != null) {
+        setSpanAttribute(
+          span,
+          SemanticConventions.LLM_TOKEN_COUNT_TOTAL,
+          usageObj.total_tokens as number,
+        );
+      } else if (
+        usageObj.input_tokens != null &&
+        usageObj.output_tokens != null
+      ) {
+        setSpanAttribute(
+          span,
+          SemanticConventions.LLM_TOKEN_COUNT_TOTAL,
+          (usageObj.input_tokens as number) +
+            (usageObj.output_tokens as number),
+        );
+      }
+    }
+  },
+  onError: (error) => {
+    diag.warn("Error extracting InvokeModel response attributes:", error);
+  },
+});
