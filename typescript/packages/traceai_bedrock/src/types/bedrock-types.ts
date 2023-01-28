@@ -196,3 +196,89 @@ import {
       "source" in content &&
       content.source !== null &&
       typeof content.source === "object" &&
+      "type" in content.source &&
+      content.source.type === "base64"
+    );
+  }
+  
+  export function isToolUseContent(content: unknown): content is ToolUseContent {
+    return (
+      content !== null &&
+      typeof content === "object" &&
+      "type" in content &&
+      content.type === "tool_use" &&
+      "name" in content &&
+      typeof content.name === "string"
+    );
+  }
+  
+  export function isToolResultContent(
+    content: unknown,
+  ): content is ToolResultContent {
+    return (
+      content !== null &&
+      typeof content === "object" &&
+      "type" in content &&
+      content.type === "tool_result" &&
+      "tool_use_id" in content &&
+      typeof content.tool_use_id === "string"
+    );
+  }
+  
+  // Type guards for Converse content blocks
+  // These are needed because AWS SDK ContentBlock has complex union types that don't match our processing needs
+  export function isConverseTextContent(
+    content: unknown,
+  ): content is ConverseTextContent {
+    return (
+      content !== null &&
+      typeof content === "object" &&
+      "text" in content &&
+      typeof content.text === "string"
+    );
+  }
+  
+  export function isConverseImageContent(
+    content: unknown,
+  ): content is ConverseImageContent {
+    return (
+      content !== null &&
+      typeof content === "object" &&
+      "image" in content &&
+      content.image !== null &&
+      typeof content.image === "object" &&
+      "source" in content.image &&
+      content.image.source !== null &&
+      typeof content.image.source === "object" &&
+      "bytes" in content.image.source &&
+      content.image.source.bytes instanceof Uint8Array
+    );
+  }
+  
+  export function isConverseToolUseContent(
+    content: unknown,
+  ): content is ConverseToolUseContent {
+    return (
+      content !== null &&
+      typeof content === "object" &&
+      "toolUse" in content &&
+      content.toolUse !== null &&
+      typeof content.toolUse === "object" &&
+      "name" in content.toolUse &&
+      typeof content.toolUse.name === "string" &&
+      "toolUseId" in content.toolUse &&
+      typeof content.toolUse.toolUseId === "string"
+    );
+  }
+  
+  export function isConverseToolResultContent(
+    content: unknown,
+  ): content is ConverseToolResultContent {
+    return (
+      isObjectWithStringKeys(content) &&
+      "toolResult" in content &&
+      isObjectWithStringKeys(content.toolResult) &&
+      "toolUseId" in content.toolResult &&
+      typeof content.toolResult.toolUseId === "string"
+    );
+  }
