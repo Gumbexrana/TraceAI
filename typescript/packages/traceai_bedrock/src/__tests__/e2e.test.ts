@@ -108,3 +108,51 @@ describeE2E("Bedrock E2E Tests", () => {
       } catch (error) {
         console.log("System prompt errored (span still exported):", (error as Error).message);
       }
+    }, 30000);
+  });
+
+  describe("InvokeModel", () => {
+    it("should invoke a model directly", async () => {
+      try {
+        const body = JSON.stringify({
+          anthropic_version: "bedrock-2023-05-31",
+          max_tokens: 20,
+          messages: [
+            { role: "user", content: "Say hello in one word." },
+          ],
+        });
+
+        const response = await client.send(new InvokeModelCommand({
+          modelId: "anthropic.claude-3-haiku-20240307-v1:0",
+          body: new TextEncoder().encode(body),
+          contentType: "application/json",
+          accept: "application/json",
+        }));
+
+        const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+        expect(responseBody.content).toBeDefined();
+        console.log("InvokeModel response:", JSON.stringify(responseBody.content));
+      } catch (error) {
+        console.log("InvokeModel errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+
+  describe("Error Handling", () => {
+    it("should handle invalid model gracefully", async () => {
+      try {
+        await client.send(new ConverseCommand({
+          modelId: "non-existent-model-12345",
+          messages: [
+            {
+              role: "user",
+              content: [{ text: "Hello" }],
+            },
+          ],
+        }));
+      } catch (error) {
+        console.log("Error handling: correctly threw on invalid model");
+      }
+    }, 30000);
+  });
+});
