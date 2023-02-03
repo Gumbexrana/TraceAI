@@ -49,3 +49,25 @@
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.10",
     "jest": "^29.7.0",
+    "rimraf": "^6.0.1",
+    "ts-jest": "^29.2.5",
+    "tsc-alias": "^1.8.10",
+    "typescript": "^5.7.3"
+  },
+  "peerDependencies": {
+    "beeai-framework": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "beeai-framework": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!**/__tests__/**"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
