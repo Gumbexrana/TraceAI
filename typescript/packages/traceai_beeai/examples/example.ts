@@ -38,3 +38,21 @@ async function main() {
   const llm = new OllamaLLM({
     modelId: "llama3.1",
   });
+
+  // Create a BeeAgent
+  const agent = new BeeAgent({
+    llm,
+    memory: new TokenMemory({ llm }),
+    tools: [],
+  });
+
+  // Run the agent
+  const response = await agent.run(
+    { prompt: "What is the capital of France?" },
+    { execution: { maxIterations: 3 } }
+  );
+
+  console.log("Agent response:", response.result?.text);
+}
+
+main().catch(console.error);

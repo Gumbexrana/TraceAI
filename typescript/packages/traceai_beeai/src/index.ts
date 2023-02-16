@@ -1,0 +1,4 @@
+export {
+  BeeAIInstrumentation,
+  BeeAIInstrumentationConfig,
+  isPatched,
