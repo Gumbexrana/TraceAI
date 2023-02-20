@@ -167,3 +167,76 @@ export class BeeAIInstrumentation extends InstrumentationBase {
       span.setStatus({ code: SpanStatusCode.OK });
       span.end();
 
+      return result;
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (error as Error).message,
+      });
+      span.end();
+      throw error;
+    }
+  }
+
+  private async *wrapAsyncIterator(
+    iterator: AsyncIterable<any>,
+    span: Span
+  ): AsyncIterable<any> {
+    const chunks: any[] = [];
+    let finalOutput: any;
+
+    try {
+      for await (const chunk of iterator) {
+        chunks.push(chunk);
+        if (chunk.finalOutput !== undefined) {
+          finalOutput = chunk.finalOutput;
+        }
+        yield chunk;
+      }
+
+      span.setAttributes({
+        [SemanticConventions.OUTPUT_VALUE]: safeJsonStringify(finalOutput || chunks),
+        [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.JSON,
+        [SemanticConventions.RAW_OUTPUT]: safeJsonStringify(chunks),
+      });
+      span.setStatus({ code: SpanStatusCode.OK });
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (error as Error).message,
+      });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+}
+
+// Global patched flag
+let _isFIPatched = false;
+
+/**
+ * Check if the module has been patched.
+ */
+export function isPatched(): boolean {
+  return _isFIPatched;
+}
+
+/**
+ * Reset the patched state (for testing only).
+ */
+export function _resetPatchedStateForTesting(): void {
+  _isFIPatched = false;
+}
+
+// Helper functions
+
+function safeJsonStringify(obj: unknown): string {
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    return String(obj);
+  }
+}
