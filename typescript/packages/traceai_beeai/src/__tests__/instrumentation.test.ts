@@ -46,3 +46,75 @@ describe("BeeAIInstrumentation", () => {
         },
       });
       expect(inst).toBeInstanceOf(BeeAIInstrumentation);
+    });
+  });
+
+  describe("isPatched", () => {
+    it("should return false when not patched", () => {
+      instrumentation.disable();
+      expect(isPatched()).toBe(false);
+    });
+  });
+
+  describe("manuallyInstrument", () => {
+    it("should handle manual instrumentation of mock module", () => {
+      instrumentation.enable();
+
+      // Create a mock BeeAgent class
+      const mockBeeModule = {
+        BeeAgent: class {
+          async run(input: string) {
+            return { output: `Processed: ${input}` };
+          }
+        },
+      };
+
+      // Should not throw
+      instrumentation.manuallyInstrument(mockBeeModule);
+      expect(isPatched()).toBe(true);
+    });
+  });
+});
+
+describe("BeeAI Agent Tracing", () => {
+  const memoryExporter = new InMemorySpanExporter();
+  const tracerProvider = new NodeTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(memoryExporter)]
+  });
+  tracerProvider.register();
+
+  const instrumentation = new BeeAIInstrumentation();
+  instrumentation.setTracerProvider(tracerProvider);
+
+  beforeEach(() => {
+    memoryExporter.reset();
+    instrumentation.enable();
+  });
+
+  afterEach(() => {
+    instrumentation.disable();
+  });
+
+  it("should trace agent run with mock", async () => {
+    // Create a mock BeeAgent class with instrumented behavior
+    class MockBeeAgent {
+      async run(input: string) {
+        return { output: `Response to: ${input}` };
+      }
+    }
+
+    const mockModule = { BeeAgent: MockBeeAgent } as any;
+    // Reset global patched flag so manuallyInstrument can patch fresh module
+    _resetPatchedStateForTesting();
+    instrumentation.manuallyInstrument(mockModule);
+
+    const agent = new mockModule.BeeAgent();
+    const result = await agent.run("Hello");
+
+    expect(result).toEqual({ output: "Response to: Hello" });
+
+    // Check spans were created
+    const spans = memoryExporter.getFinishedSpans();
+    expect(spans.length).toBeGreaterThanOrEqual(1);
+  });
+});
