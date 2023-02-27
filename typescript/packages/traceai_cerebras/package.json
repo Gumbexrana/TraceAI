@@ -1,0 +1,28 @@
+{
+  "name": "@traceai/cerebras",
+  "version": "0.1.0",
+  "description": "TraceAI instrumentation for Cerebras AI",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/cjs/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/cjs/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run build:cjs && npm run build:esm",
+    "build:cjs": "tsc -p tsconfig.json",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "test": "jest --config jest.config.js",
+    "test:e2e": "jest --config jest.config.js --testMatch '**/*.e2e.test.ts'",
+    "clean": "rimraf dist"
+  },
+  "keywords": [
+    "traceai",
+    "opentelemetry",
