@@ -59,3 +59,96 @@ const response = await client.chat.completions.create({
 
 Cerebras provides detailed timing information for analyzing inference performance:
 
+```typescript
+const response = await client.chat.completions.create({
+  model: "llama3.1-70b",
+  messages: [{ role: "user", content: "Explain quantum computing." }],
+});
+
+// Time info is captured in span attributes:
+// cerebras.queue_time: 0.001 (seconds)
+// cerebras.prompt_time: 0.015 (seconds)
+// cerebras.completion_time: 0.045 (seconds)
+// cerebras.total_time: 0.061 (seconds)
+
+if (response.time_info) {
+  const tokensPerSecond = response.usage.completion_tokens / response.time_info.completion_time;
+  console.log(`Throughput: ${tokensPerSecond.toFixed(0)} tokens/second`);
+}
+```
+
+### Streaming Responses
+
+```typescript
+const stream = await client.chat.completions.create({
+  model: "llama3.1-8b",
+  messages: [{ role: "user", content: "Count to 5." }],
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content || "");
+}
+```
+
+### High-Throughput Inference
+
+Cerebras is optimized for extremely fast inference:
+
+```typescript
+const startTime = Date.now();
+
+const response = await client.chat.completions.create({
+  model: "llama3.1-70b",
+  messages: [
+    { role: "user", content: "Write a haiku about AI." },
+  ],
+  max_tokens: 50,
+});
+
+const latency = Date.now() - startTime;
+console.log(`End-to-end latency: ${latency}ms`);
+console.log(`Server time: ${response.time_info?.total_time}s`);
+```
+
+## Configuration Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `instrumentationConfig` | `InstrumentationConfig` | OpenTelemetry instrumentation config |
+| `traceConfig` | `TraceConfigOptions` | TraceAI config (hideInputs, hideOutputs, etc.) |
+
+## Captured Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `fi.span.kind` | Always "LLM" |
+| `llm.system` | "cerebras" |
+| `llm.provider` | "cerebras" |
+| `llm.model` | Model name (llama3.1-8b, llama3.1-70b) |
+| `llm.token_count.prompt` | Input token count |
+| `llm.token_count.completion` | Output token count |
+| `llm.token_count.total` | Total token count |
+| `cerebras.queue_time` | Time spent in queue (seconds) |
+| `cerebras.prompt_time` | Time to process prompt (seconds) |
+| `cerebras.completion_time` | Time to generate completion (seconds) |
+| `cerebras.total_time` | Total server-side time (seconds) |
+
+## Available Models
+
+| Model | Description |
+|-------|-------------|
+| `llama3.1-8b` | Llama 3.1 8B - fast general-purpose |
+| `llama3.1-70b` | Llama 3.1 70B - high capability |
+
+## Why Cerebras?
+
+Cerebras Cloud runs on Wafer-Scale Engine (WSE) hardware, providing:
+- Ultra-low latency inference
+- High throughput (thousands of tokens/second)
+- Consistent performance under load
+- No GPU scheduling overhead
+
+## License
+
+Apache-2.0
