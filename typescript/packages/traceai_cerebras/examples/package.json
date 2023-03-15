@@ -1,0 +1,8 @@
+{
+  "name": "@traceai/cerebras-examples",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Examples for @traceai/cerebras",
+  "scripts": {
+    "example": "ts-node example.ts"
+  },
