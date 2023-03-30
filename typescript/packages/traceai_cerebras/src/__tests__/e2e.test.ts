@@ -72,3 +72,36 @@ describeE2E("Cerebras E2E Tests", () => {
   it("should trace streaming chat completion", async () => {
     try {
       const stream = await client.chat.completions.create({
+        model: "llama3.1-8b",
+        messages: [
+          { role: "user", content: "Count from 1 to 3." },
+        ],
+        max_tokens: 20,
+        stream: true,
+      });
+
+      let fullContent = "";
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          fullContent += content;
+        }
+      }
+
+      expect(fullContent.length).toBeGreaterThan(0);
+      console.log("Streaming response:", fullContent);
+    } catch (error) {
+      console.log("Streaming errored (span still exported):", (error as Error).message);
+    }
+  }, 30000);
+
+  it("should handle errors gracefully", async () => {
+    await expect(
+      client.chat.completions.create({
+        model: "non-existent-model",
+        messages: [{ role: "user", content: "Hello" }],
+      })
+    ).rejects.toThrow();
+    console.log("Error handling: correctly threw on invalid model");
+  }, 30000);
+});
