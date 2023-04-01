@@ -330,3 +330,146 @@ describe("CerebrasInstrumentation", () => {
       const chunks = [
         {
           id: "chatcmpl-123",
+          object: "chat.completion.chunk",
+          created: 1677652288,
+          model: "llama3.1-8b",
+          choices: [{ index: 0, delta: { content: "Hello" }, finish_reason: null }],
+        },
+        {
+          id: "chatcmpl-123",
+          object: "chat.completion.chunk",
+          created: 1677652288,
+          model: "llama3.1-8b",
+          choices: [{ index: 0, delta: { content: " world" }, finish_reason: null }],
+        },
+        {
+          id: "chatcmpl-123",
+          object: "chat.completion.chunk",
+          created: 1677652288,
+          model: "llama3.1-8b",
+          choices: [{ index: 0, delta: { content: "!" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+          time_info: {
+            queue_time: 0.001,
+            prompt_time: 0.01,
+            completion_time: 0.03,
+            total_time: 0.041,
+          },
+        },
+      ];
+
+      async function* mockStream() {
+        for (const chunk of chunks) {
+          yield chunk;
+        }
+      }
+
+      mockOriginal.mockResolvedValueOnce(mockStream());
+
+      const body = {
+        model: "llama3.1-8b",
+        messages: [{ role: "user", content: "Hello!" }],
+        stream: true,
+      };
+
+      const result = await patchedFn(body);
+      const collectedChunks: unknown[] = [];
+
+      for await (const chunk of result as AsyncIterable<unknown>) {
+        collectedChunks.push(chunk);
+      }
+
+      expect(collectedChunks.length).toBe(3);
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans.length).toBe(1);
+
+      const span = spans[0];
+      expect(span.attributes[SemanticConventions.OUTPUT_VALUE]).toBe("Hello world!");
+
+      // Time info from last chunk
+      expect(span.attributes["cerebras.queue_time"]).toBe(0.001);
+      expect(span.attributes["cerebras.total_time"]).toBe(0.041);
+    });
+
+    it("should handle stream errors", async () => {
+      async function* mockErrorStream() {
+        yield {
+          id: "chatcmpl-123",
+          choices: [{ index: 0, delta: { content: "Hello" } }],
+        };
+        throw new Error("Stream error");
+      }
+
+      mockOriginal.mockResolvedValueOnce(mockErrorStream());
+
+      const body = {
+        model: "llama3.1-8b",
+        messages: [{ role: "user", content: "Hello!" }],
+        stream: true,
+      };
+
+      const result = await patchedFn(body);
+
+      const consumeStream = async () => {
+        for await (const _chunk of result as AsyncIterable<unknown>) {
+          // consume
+        }
+      };
+
+      await expect(consumeStream()).rejects.toThrow("Stream error");
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans.length).toBe(1);
+      expect(spans[0].status.code).toBe(2);
+    });
+  });
+
+  describe("invocation parameters", () => {
+    let mockOriginal: jest.Mock;
+    let patchedFn: (body: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown>;
+
+    beforeEach(() => {
+      mockOriginal = jest.fn().mockResolvedValue({
+        id: "chatcmpl-123",
+        object: "chat.completion",
+        created: 1677652288,
+        model: "llama3.1-8b",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "Response" },
+            finish_reason: "stop",
+          },
+        ],
+      });
+
+      const wrapperFactory = (instrumentation as unknown as {
+        createChatCompletionWrapper: (inst: CerebrasInstrumentation) => (original: jest.Mock) => typeof patchedFn;
+      }).createChatCompletionWrapper(instrumentation);
+      patchedFn = wrapperFactory(mockOriginal);
+    });
+
+    it("should capture invocation parameters", async () => {
+      const body = {
+        model: "llama3.1-8b",
+        messages: [{ role: "user", content: "Hello!" }],
+        temperature: 0.7,
+        max_tokens: 100,
+        top_p: 0.9,
+        stop: ["END"],
+      };
+
+      await patchedFn(body);
+
+      const spans = memoryExporter.getFinishedSpans();
+      const span = spans[0];
+
+      const invocationParams = JSON.parse(span.attributes[SemanticConventions.LLM_INVOCATION_PARAMETERS] as string);
+      expect(invocationParams.temperature).toBe(0.7);
+      expect(invocationParams.max_tokens).toBe(100);
+      expect(invocationParams.top_p).toBe(0.9);
+      expect(invocationParams.stop).toEqual(["END"]);
+    });
+  });
+});
