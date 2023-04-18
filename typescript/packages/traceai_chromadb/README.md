@@ -306,3 +306,136 @@ async function recallMemory(conversationId: string, currentMessage: string, limi
     content: doc,
     role: results.metadatas[0][i].role,
     timestamp: results.metadatas[0][i].timestamp,
+  }));
+}
+
+// Cleanup old memories (traced)
+async function cleanupOldMemories(conversationId: string, keepLast = 100) {
+  const allMemories = await memoryCollection.get({
+    where: { conversation_id: conversationId },
+    include: ["metadatas"],
+  });
+
+  if (allMemories.ids.length > keepLast) {
+    const sortedIds = allMemories.ids
+      .map((id, i) => ({ id, timestamp: allMemories.metadatas[i].timestamp }))
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    const idsToDelete = sortedIds.slice(keepLast).map(m => m.id);
+
+    await memoryCollection.delete({ ids: idsToDelete });
+  }
+}
+```
+
+### 4. Document Deduplication
+
+Find and remove duplicate documents:
+
+```typescript
+async function findDuplicates(collection: any, threshold = 0.95) {
+  const allDocs = await collection.peek({ limit: 1000 });
+  const duplicates: string[][] = [];
+
+  for (let i = 0; i < allDocs.ids.length; i++) {
+    // Query for similar documents (traced)
+    const results = await collection.query({
+      queryEmbeddings: [allDocs.embeddings[i]],
+      nResults: 5,
+      include: ["distances"],
+    });
+
+    // Find near-duplicates (distance < 1 - threshold for cosine)
+    const similarIds = results.ids[0]
+      .filter((id, j) => {
+        const similarity = 1 - results.distances[0][j];
+        return id !== allDocs.ids[i] && similarity >= threshold;
+      });
+
+    if (similarIds.length > 0) {
+      duplicates.push([allDocs.ids[i], ...similarIds]);
+    }
+  }
+
+  return duplicates;
+}
+
+// Remove duplicates, keeping the first one
+async function removeDuplicates(collection: any, duplicateGroups: string[][]) {
+  const idsToRemove = duplicateGroups.flatMap(group => group.slice(1));
+
+  if (idsToRemove.length > 0) {
+    await collection.delete({ ids: idsToRemove });
+  }
+
+  return idsToRemove.length;
+}
+```
+
+## Viewing Traces
+
+After setting up the instrumentation, you can view your traces in the Future AGI dashboard:
+
+1. Go to [app.futureagi.com](https://app.futureagi.com)
+2. Navigate to your project
+3. View the Traces section to see all ChromaDB operations
+4. Each span shows:
+   - Operation type (add, query, etc.)
+   - Collection name
+   - Query parameters
+   - Number of results
+   - Timing information
+   - Any errors that occurred
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `FI_API_KEY` | Your Future AGI API key |
+| `FI_PROJECT_NAME` | Your project name |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL |
+
+## Troubleshooting
+
+### Spans Not Appearing
+
+1. Ensure instrumentation is registered before importing ChromaDB
+2. Verify your OTLP exporter is configured correctly
+3. Check that your API key and project name are set
+
+### Large Span Sizes
+
+If spans are too large, disable vector capture:
+
+```typescript
+new ChromaDBInstrumentation({
+  instrumentationConfig: {
+    captureQueryVectors: false,
+    captureResultVectors: false,
+  },
+});
+```
+
+## Development
+
+```bash
+# Build
+pnpm build
+
+# Run tests
+pnpm test
+
+# Type check
+pnpm tsc --noEmit
+```
+
+## License
+
+Apache-2.0
+
+## Links
+
+- [Future AGI Documentation](https://docs.futureagi.com)
+- [ChromaDB Documentation](https://docs.trychroma.com)
+- [OpenTelemetry](https://opentelemetry.io)
+- [GitHub Issues](https://github.com/future-agi/traceAI/issues)
