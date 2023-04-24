@@ -214,3 +214,329 @@ export class ChromaDBInstrumentation extends InstrumentationBase {
       [SemanticConventions.FI_SPAN_KIND]: "VECTOR_DB",
     };
   }
+
+  private async wrapAdd(
+    original: Function,
+    instance: any,
+    params: any
+  ): Promise<any> {
+    const collectionName = this.getCollectionName(instance);
+    const attributes = this.getCommonAttributes("add", collectionName);
+
+    // Extract counts
+    const ids = params?.ids || [];
+    const embeddings = params?.embeddings;
+    const documents = params?.documents;
+
+    attributes[VectorDBConventions.DB_VECTOR_UPSERT_COUNT] = ids.length;
+
+    if (embeddings && embeddings.length > 0 && embeddings[0]) {
+      attributes[VectorDBConventions.DB_VECTOR_UPSERT_DIMENSIONS] =
+        embeddings[0].length;
+    }
+
+    if (documents) {
+      attributes["db.vector.documents.count"] = documents.length;
+    }
+
+    const span = this.fiTracer.startSpan("chroma add", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, params)
+      );
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapQuery(
+    original: Function,
+    instance: any,
+    params: any
+  ): Promise<any> {
+    const collectionName = this.getCollectionName(instance);
+    const attributes = this.getCommonAttributes("query", collectionName);
+
+    const nResults = params?.nResults || params?.n_results || 10;
+    attributes[VectorDBConventions.DB_VECTOR_QUERY_TOP_K] = nResults;
+
+    if (params?.where) {
+      attributes[VectorDBConventions.DB_VECTOR_QUERY_FILTER] =
+        JSON.stringify(params.where);
+    }
+
+    if (params?.include) {
+      attributes[VectorDBConventions.DB_VECTOR_QUERY_INCLUDE_METADATA] =
+        params.include.includes("metadatas");
+      attributes[VectorDBConventions.DB_VECTOR_QUERY_INCLUDE_VECTORS] =
+        params.include.includes("embeddings");
+    }
+
+    const span = this.fiTracer.startSpan("chroma query", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, params)
+      );
+
+      // Add result attributes
+      if (result?.ids) {
+        const resultCount = Array.isArray(result.ids[0])
+          ? result.ids[0].length
+          : result.ids.length;
+        span.setAttribute(
+          VectorDBConventions.DB_VECTOR_RESULTS_COUNT,
+          resultCount
+        );
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapGet(
+    original: Function,
+    instance: any,
+    params?: any
+  ): Promise<any> {
+    const collectionName = this.getCollectionName(instance);
+    const attributes = this.getCommonAttributes("get", collectionName);
+
+    if (params?.ids) {
+      attributes["db.vector.get.ids_count"] = params.ids.length;
+    }
+
+    if (params?.limit) {
+      attributes[VectorDBConventions.DB_VECTOR_QUERY_TOP_K] =
+        params.limit;
+    }
+
+    const span = this.fiTracer.startSpan("chroma get", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, params)
+      );
+
+      if (result?.ids) {
+        span.setAttribute(
+          VectorDBConventions.DB_VECTOR_RESULTS_COUNT,
+          result.ids.length
+        );
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapUpdate(
+    original: Function,
+    instance: any,
+    params: any
+  ): Promise<any> {
+    const collectionName = this.getCollectionName(instance);
+    const attributes = this.getCommonAttributes("update", collectionName);
+
+    const ids = params?.ids || [];
+    attributes[VectorDBConventions.DB_VECTOR_UPSERT_COUNT] = ids.length;
+
+    const span = this.fiTracer.startSpan("chroma update", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, params)
+      );
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapUpsert(
+    original: Function,
+    instance: any,
+    params: any
+  ): Promise<any> {
+    const collectionName = this.getCollectionName(instance);
+    const attributes = this.getCommonAttributes("upsert", collectionName);
+
+    const ids = params?.ids || [];
+    attributes[VectorDBConventions.DB_VECTOR_UPSERT_COUNT] = ids.length;
+
+    if (params?.embeddings && params.embeddings.length > 0) {
+      attributes[VectorDBConventions.DB_VECTOR_UPSERT_DIMENSIONS] =
+        params.embeddings[0].length;
+    }
+
+    const span = this.fiTracer.startSpan("chroma upsert", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, params)
+      );
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapDelete(
+    original: Function,
+    instance: any,
+    params?: any
+  ): Promise<any> {
+    const collectionName = this.getCollectionName(instance);
+    const attributes = this.getCommonAttributes("delete", collectionName);
+
+    if (params?.ids) {
+      attributes[VectorDBConventions.DB_VECTOR_DELETE_COUNT] =
+        params.ids.length;
+    }
+
+    const span = this.fiTracer.startSpan("chroma delete", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, params)
+      );
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapCount(original: Function, instance: any): Promise<any> {
+    const collectionName = this.getCollectionName(instance);
+    const attributes = this.getCommonAttributes("count", collectionName);
+
+    const span = this.fiTracer.startSpan("chroma count", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance)
+      );
+
+      if (typeof result === "number") {
+        span.setAttribute(
+          VectorDBConventions.DB_VECTOR_RESULTS_COUNT,
+          result
+        );
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapPeek(
+    original: Function,
+    instance: any,
+    params?: any
+  ): Promise<any> {
+    const collectionName = this.getCollectionName(instance);
+    const attributes = this.getCommonAttributes("peek", collectionName);
+
+    if (params?.limit) {
+      attributes[VectorDBConventions.DB_VECTOR_QUERY_TOP_K] =
+        params.limit;
+    }
+
+    const span = this.fiTracer.startSpan("chroma peek", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, params)
+      );
+
+      if (result?.ids) {
+        span.setAttribute(
+          VectorDBConventions.DB_VECTOR_RESULTS_COUNT,
+          result.ids.length
+        );
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+}
