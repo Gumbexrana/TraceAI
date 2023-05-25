@@ -412,3 +412,181 @@ export class CohereInstrumentation extends InstrumentationBase {
                   ...getRerankResultsAttributes(result),
                   [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(result) ?? "",
                 });
+                span.setStatus({ code: SpanStatusCode.OK });
+                span.end();
+                return result;
+              }).catch((error: Error) => {
+                span.recordException(error);
+                span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+                span.end();
+                throw error;
+              });
+
+              return context.bind(execContext, wrappedPromise);
+            };
+          },
+        );
+      }
+    }
+
+    _isFIPatched = true;
+    try {
+      module.fiPatched = true;
+    } catch (e) {
+      diag.warn(`Failed to set fiPatched flag on module '${MODULE_NAME}'. Error: ${e}`);
+    }
+
+    return module;
+  }
+
+  /**
+   * Un-patches the Cohere module
+   */
+  private unpatch(
+    moduleExports: Record<string, unknown> & { fiPatched?: boolean },
+    moduleVersion?: string,
+  ) {
+    const CohereClient = moduleExports.CohereClient as {
+      prototype?: Record<string, unknown>;
+    } | undefined;
+
+    if (CohereClient?.prototype) {
+      if (CohereClient.prototype.chat) {
+        this._unwrap(CohereClient.prototype, "chat");
+      }
+      if (CohereClient.prototype.embed) {
+        this._unwrap(CohereClient.prototype, "embed");
+      }
+      if (CohereClient.prototype.rerank) {
+        this._unwrap(CohereClient.prototype, "rerank");
+      }
+    }
+
+    _isFIPatched = false;
+    try {
+      moduleExports.fiPatched = false;
+    } catch (e) {
+      diag.warn(`Failed to unset fiPatched flag on module '${MODULE_NAME}'. Error: ${e}`);
+    }
+  }
+}
+
+/**
+ * Converts the chat request to LLM input messages
+ */
+function getChatInputMessagesAttributes(request: CohereChatRequest): Attributes {
+  const messages: Record<string, unknown>[] = [];
+
+  if (request.preamble) {
+    messages.push({ role: 'system', content: request.preamble });
+  }
+
+  if (request.chat_history) {
+    request.chat_history.forEach((msg) => {
+      messages.push({ role: msg.role, content: msg.message });
+    });
+  }
+
+  messages.push({ role: 'user', content: request.message });
+
+  return { [SemanticConventions.LLM_INPUT_MESSAGES]: safelyJSONStringify(messages) ?? "[]" };
+}
+
+/**
+ * Gets chat tools attributes
+ */
+function getChatToolsAttributes(request: CohereChatRequest): Attributes {
+  if (!request.tools) {
+    return {};
+  }
+  return { [SemanticConventions.LLM_TOOLS]: safelyJSONStringify(request.tools) ?? "[]" };
+}
+
+/**
+ * Gets chat output messages attributes
+ */
+function getChatOutputMessagesAttributes(response: CohereChatResponse): Attributes {
+  const msg: Record<string, unknown> = { role: 'assistant', content: response.text };
+
+  if (response.tool_calls) {
+    msg.tool_calls = response.tool_calls.map((tc) => ({
+      function: { name: tc.name, arguments: JSON.stringify(tc.parameters) },
+    }));
+  }
+
+  return { [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify([msg]) ?? "[]" };
+}
+
+/**
+ * Gets chat usage attributes
+ */
+function getChatUsageAttributes(response: CohereChatResponse): Attributes {
+  const meta = response.meta;
+  if (!meta) {
+    return {};
+  }
+
+  const billedUnits = meta.billed_units;
+  const tokens = meta.tokens;
+
+  if (billedUnits) {
+    return {
+      [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]: billedUnits.input_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]: billedUnits.output_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]:
+        (billedUnits.input_tokens || 0) + (billedUnits.output_tokens || 0),
+    };
+  }
+
+  if (tokens) {
+    return {
+      [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]: tokens.input_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]: tokens.output_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]:
+        (tokens.input_tokens || 0) + (tokens.output_tokens || 0),
+    };
+  }
+
+  return {};
+}
+
+/**
+ * Gets embed text attributes
+ */
+function getEmbedTextAttributes(request: CohereEmbedRequest): Attributes {
+  return request.texts.reduce((acc, text, index) => {
+    acc[`${SemanticConventions.EMBEDDING_EMBEDDINGS}.${index}.${SemanticConventions.EMBEDDING_TEXT}`] = text;
+    return acc;
+  }, {} as Attributes);
+}
+
+/**
+ * Gets embed vector attributes
+ */
+function getEmbedVectorAttributes(response: CohereEmbedResponse): Attributes {
+  const embeddings = Array.isArray(response.embeddings)
+    ? response.embeddings
+    : (response.embeddings as { float?: number[][] })?.float || [];
+
+  return embeddings.reduce((acc, embedding, index) => {
+    acc[`${SemanticConventions.EMBEDDING_EMBEDDINGS}.${index}.${SemanticConventions.EMBEDDING_VECTOR}`] = embedding;
+    return acc;
+  }, {} as Attributes);
+}
+
+/**
+ * Gets rerank results attributes
+ */
+function getRerankResultsAttributes(response: CohereRerankResponse): Attributes {
+  const attributes: Attributes = {};
+
+  response.results.forEach((result, index) => {
+    attributes[`cohere.rerank.results.${index}.index`] = result.index;
+    attributes[`cohere.rerank.results.${index}.relevance_score`] = result.relevance_score;
+    if (result.document) {
+      attributes[`cohere.rerank.results.${index}.document`] = result.document.text;
+    }
+  });
+
+  return attributes;
+}
