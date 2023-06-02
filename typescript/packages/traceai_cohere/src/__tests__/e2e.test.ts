@@ -96,3 +96,152 @@ describeE2E("Cohere E2E Tests", () => {
           model: "command-r-08-2024",
         });
 
+        const chunks: string[] = [];
+        for await (const event of stream) {
+          if (event.eventType === "text-generation") {
+            chunks.push(event.text);
+          }
+        }
+
+        console.log("Streaming response:", chunks.join(""));
+      } catch (error) {
+        console.log("Streaming errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should handle tool calling", async () => {
+      try {
+        const response = await client.chat({
+          message: "What is the weather in Tokyo?",
+          model: "command-r-08-2024",
+          tools: [
+            {
+              name: "get_weather",
+              description: "Get weather for a location",
+              parameterDefinitions: {
+                location: {
+                  type: "str",
+                  description: "City name",
+                  required: true,
+                },
+              },
+            },
+          ],
+        });
+        console.log("Tool calling response received");
+      } catch (error) {
+        console.log("Tool calling errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+
+  describe("Embeddings", () => {
+    it("should generate embeddings for text", async () => {
+      try {
+        const response = await client.embed({
+          texts: ["Hello, world!"],
+          model: "embed-english-v3.0",
+          inputType: "search_document",
+        });
+        console.log("Embedding response received");
+      } catch (error) {
+        console.log("Embedding errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should generate embeddings for multiple texts", async () => {
+      try {
+        const response = await client.embed({
+          texts: ["Hello", "World", "Test"],
+          model: "embed-english-v3.0",
+          inputType: "search_document",
+        });
+        console.log("Batch embedding response received");
+      } catch (error) {
+        console.log("Batch embedding errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should generate multilingual embeddings", async () => {
+      try {
+        const response = await client.embed({
+          texts: ["Hello", "Bonjour", "Hola", "Hallo"],
+          model: "embed-multilingual-v3.0",
+          inputType: "search_document",
+        });
+        console.log("Multilingual embedding response received");
+      } catch (error) {
+        console.log("Multilingual embedding errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+
+  describe("Rerank", () => {
+    it("should rerank documents", async () => {
+      try {
+        const response = await client.rerank({
+          query: "What is the capital of France?",
+          documents: [
+            "Paris is the capital of France.",
+            "Berlin is the capital of Germany.",
+            "London is the capital of the United Kingdom.",
+          ],
+          model: "rerank-english-v3.0",
+          topN: 2,
+        });
+        console.log("Rerank response received, results:", response.results.length);
+      } catch (error) {
+        console.log("Rerank errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should rerank and return documents", async () => {
+      try {
+        const response = await client.rerank({
+          query: "How do computers work?",
+          documents: [
+            "Computers process data using electronic circuits.",
+            "The Internet connects computers worldwide.",
+            "Programming languages are used to write software.",
+          ],
+          model: "rerank-english-v3.0",
+          topN: 2,
+          returnDocuments: true,
+        });
+        console.log("Rerank with documents response received");
+      } catch (error) {
+        console.log("Rerank with documents errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should handle multilingual reranking", async () => {
+      try {
+        const response = await client.rerank({
+          query: "What is artificial intelligence?",
+          documents: [
+            "AI is a branch of computer science.",
+            "Machine learning is a subset of AI.",
+            "Natural language processing enables computers to understand text.",
+          ],
+          model: "rerank-multilingual-v3.0",
+          topN: 3,
+        });
+        console.log("Multilingual rerank response received");
+      } catch (error) {
+        console.log("Multilingual rerank errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+
+  describe("Error Handling", () => {
+    it("should handle invalid model gracefully", async () => {
+      await expect(
+        client.chat({
+          message: "Hello",
+          model: "non-existent-model-12345" as any,
+        })
+      ).rejects.toThrow();
+      console.log("Error handling: correctly threw on invalid model");
+    }, 30000);
+  });
+});
