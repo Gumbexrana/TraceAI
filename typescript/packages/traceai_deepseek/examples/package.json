@@ -1,0 +1,8 @@
+{
+  "name": "@traceai/deepseek-examples",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Examples for @traceai/deepseek",
+  "scripts": {
+    "example": "ts-node example.ts"
+  },
