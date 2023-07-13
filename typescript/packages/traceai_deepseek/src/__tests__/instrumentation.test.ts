@@ -315,3 +315,140 @@ describe("DeepSeekInstrumentation", () => {
           },
         ],
       };
+
+      await patchedFn(body);
+
+      const spans = memoryExporter.getFinishedSpans();
+      const span = spans[0];
+
+      const outputMessages = JSON.parse(span.attributes[SemanticConventions.LLM_OUTPUT_MESSAGES] as string);
+      expect(outputMessages[0].tool_calls[0].id).toBe("call_123");
+      expect(outputMessages[0].tool_calls[0].function.name).toBe("get_weather");
+    });
+
+    it("should handle errors gracefully", async () => {
+      const error = new Error("API Error");
+      mockOriginal.mockRejectedValueOnce(error);
+
+      const body = {
+        model: "deepseek-chat",
+        messages: [
+          { role: "user", content: "Hello!" },
+        ],
+      };
+
+      await expect(patchedFn(body)).rejects.toThrow("API Error");
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans.length).toBe(1);
+      expect(spans[0].status.code).toBe(2);
+    });
+  });
+
+  describe("streaming response handling", () => {
+    let mockOriginal: jest.Mock;
+    let patchedFn: (body: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown>;
+
+    beforeEach(() => {
+      const wrapperFactory = (instrumentation as unknown as {
+        createChatCompletionWrapper: (inst: DeepSeekInstrumentation) => (original: jest.Mock) => typeof patchedFn;
+      }).createChatCompletionWrapper(instrumentation);
+
+      mockOriginal = jest.fn();
+      patchedFn = wrapperFactory(mockOriginal).bind({ baseURL: "https://api.deepseek.com/v1" });
+    });
+
+    it("should handle streaming responses", async () => {
+      const chunks = [
+        {
+          id: "chatcmpl-123",
+          object: "chat.completion.chunk",
+          created: 1677652288,
+          model: "deepseek-chat",
+          choices: [{ index: 0, delta: { content: "Hello" }, finish_reason: null }],
+        },
+        {
+          id: "chatcmpl-123",
+          object: "chat.completion.chunk",
+          created: 1677652288,
+          model: "deepseek-chat",
+          choices: [{ index: 0, delta: { content: " world" }, finish_reason: null }],
+        },
+        {
+          id: "chatcmpl-123",
+          object: "chat.completion.chunk",
+          created: 1677652288,
+          model: "deepseek-chat",
+          choices: [{ index: 0, delta: { content: "!" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+        },
+      ];
+
+      async function* mockStream() {
+        for (const chunk of chunks) {
+          yield chunk;
+        }
+      }
+
+      mockOriginal.mockResolvedValueOnce(mockStream());
+
+      const body = {
+        model: "deepseek-chat",
+        messages: [{ role: "user", content: "Hello!" }],
+        stream: true,
+      };
+
+      const result = await patchedFn(body);
+      const collectedChunks: unknown[] = [];
+
+      for await (const chunk of result as AsyncIterable<unknown>) {
+        collectedChunks.push(chunk);
+      }
+
+      expect(collectedChunks.length).toBe(3);
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans.length).toBe(1);
+      expect(spans[0].attributes[SemanticConventions.OUTPUT_VALUE]).toBe("Hello world!");
+    });
+
+    it("should capture reasoning content in streaming", async () => {
+      const chunks = [
+        {
+          id: "chatcmpl-123",
+          choices: [{ index: 0, delta: { reasoning_content: "Let me think" }, finish_reason: null }],
+        },
+        {
+          id: "chatcmpl-123",
+          choices: [{ index: 0, delta: { reasoning_content: "... 2+2=4" }, finish_reason: null }],
+        },
+        {
+          id: "chatcmpl-123",
+          choices: [{ index: 0, delta: { content: "4" }, finish_reason: "stop" }],
+        },
+      ];
+
+      async function* mockStream() {
+        for (const chunk of chunks) {
+          yield chunk;
+        }
+      }
+
+      mockOriginal.mockResolvedValueOnce(mockStream());
+
+      const body = {
+        model: "deepseek-reasoner",
+        messages: [{ role: "user", content: "What is 2+2?" }],
+        stream: true,
+      };
+
+      const result = await patchedFn(body);
+      for await (const _chunk of result as AsyncIterable<unknown>) {
+        // consume
+      }
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans[0].attributes["deepseek.reasoning_content"]).toBe("Let me think... 2+2=4");
+    });
+  });
+});
