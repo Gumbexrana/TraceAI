@@ -95,3 +95,45 @@ console.log(`Embedding dimensions: ${embedding.data[0].embedding.length}`);
 ### Batch Embeddings
 
 ```typescript
+const embeddings = await client.embeddings.create({
+  model: "nomic-ai/nomic-embed-text-v1.5",
+  input: ["Hello", "World", "How are you?"],
+});
+
+console.log(`Generated ${embeddings.data.length} embeddings`);
+```
+
+## Configuration Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `instrumentationConfig` | `InstrumentationConfig` | OpenTelemetry instrumentation config |
+| `traceConfig` | `TraceConfigOptions` | TraceAI config (hideInputs, hideOutputs, etc.) |
+
+## Captured Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `fi.span.kind` | "LLM" for chat/completions, "EMBEDDING" for embeddings |
+| `llm.system` | "fireworks" |
+| `llm.provider` | "fireworks" |
+| `llm.model` | Model name |
+| `llm.token_count.prompt` | Input token count |
+| `llm.token_count.completion` | Output token count |
+| `llm.token_count.total` | Total token count |
+| `embedding.model` | Embedding model name |
+| `embedding.embeddings.{n}.text` | Input text for embedding |
+| `embedding.embeddings.{n}.vector` | Embedding vector (JSON string) |
+
+## Popular Models
+
+| Model | Description |
+|-------|-------------|
+| `accounts/fireworks/models/llama-v3p1-8b-instruct` | Llama 3.1 8B Instruct |
+| `accounts/fireworks/models/llama-v3p1-70b-instruct` | Llama 3.1 70B Instruct |
+| `accounts/fireworks/models/mixtral-8x7b-instruct` | Mixtral 8x7B Instruct |
+| `nomic-ai/nomic-embed-text-v1.5` | Nomic embedding model |
+
+## License
+
+Apache-2.0
