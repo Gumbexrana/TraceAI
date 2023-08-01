@@ -72,3 +72,36 @@ async function main() {
     if (content) {
       process.stdout.write(content);
     }
+  }
+  console.log("\n");
+
+  console.log("=== Completions API Example ===\n");
+
+  // Example 3: Text completion (legacy completions API)
+  const completion = await client.completions.create({
+    model: "accounts/fireworks/models/llama-v3p1-8b-instruct",
+    prompt: "The quick brown fox",
+    max_tokens: 30,
+  });
+
+  console.log("Completion:", completion.choices[0]?.text);
+  console.log("\n");
+
+  console.log("=== Embeddings Example ===\n");
+
+  // Example 4: Embeddings
+  const embeddingResponse = await client.embeddings.create({
+    model: "nomic-ai/nomic-embed-text-v1.5",
+    input: "Hello, world!",
+  });
+
+  console.log("Embedding dimensions:", embeddingResponse.data[0]?.embedding.length);
+  console.log("First 5 values:", embeddingResponse.data[0]?.embedding.slice(0, 5));
+  console.log("\n");
+
+  // Shutdown provider
+  await provider.shutdown();
+  console.log("Done! Check the console output above for trace spans.");
+}
+
+main().catch(console.error);
