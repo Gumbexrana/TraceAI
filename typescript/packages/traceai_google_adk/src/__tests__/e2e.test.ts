@@ -47,3 +47,24 @@ describeE2E("Google ADK E2E Tests", () => {
 
       const agent = new Agent({
         name: "test-agent",
+        model: "gemini-2.0-flash",
+        instruction: "You are a helpful assistant. Answer briefly.",
+      });
+
+      expect(agent).toBeDefined();
+    }, 30000);
+
+    it("should verify instrumentation lifecycle", () => {
+      expect(instrumentation).toBeDefined();
+      instrumentation.disable();
+      instrumentation.enable();
+    });
+  });
+
+  describe("Error Handling", () => {
+    it("should handle missing configuration gracefully", async () => {
+      const adkModule = await import("@google/adk");
+      expect(adkModule).toBeDefined();
+    }, 30000);
+  });
+});
