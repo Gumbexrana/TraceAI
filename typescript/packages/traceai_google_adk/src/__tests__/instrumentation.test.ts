@@ -271,3 +271,120 @@ describe("Runner Patching", () => {
           run: originalRun,
         },
       },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+});
+
+describe("Session Patching", () => {
+  const memoryExporter = new InMemorySpanExporter();
+  const tracerProvider = new NodeTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(memoryExporter)]
+  });
+  tracerProvider.register();
+
+  beforeEach(() => {
+    memoryExporter.reset();
+    _resetPatchedStateForTesting();
+  });
+
+  it("should wrap Session.sendMessage when available", () => {
+    const inst = new GoogleADKInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const originalSend = jest.fn().mockResolvedValue({
+      output: "Session response",
+    });
+
+    const mockModule = {
+      Session: {
+        prototype: {
+          sendMessage: originalSend,
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+});
+
+describe("Response Handling", () => {
+  const memoryExporter = new InMemorySpanExporter();
+  const tracerProvider = new NodeTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(memoryExporter)]
+  });
+  tracerProvider.register();
+
+  beforeEach(() => {
+    memoryExporter.reset();
+    _resetPatchedStateForTesting();
+  });
+
+  it("should handle string output", () => {
+    const inst = new GoogleADKInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const mockModule = {
+      Agent: {
+        prototype: {
+          run: jest.fn().mockResolvedValue("Simple string response"),
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+
+  it("should handle object with usage metadata", () => {
+    const inst = new GoogleADKInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const mockModule = {
+      Agent: {
+        prototype: {
+          run: jest.fn().mockResolvedValue({
+            output: "Response",
+            usageMetadata: {
+              promptTokenCount: 100,
+              candidatesTokenCount: 50,
+              totalTokenCount: 150,
+            },
+          }),
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+
+  it("should handle tool calls in response", () => {
+    const inst = new GoogleADKInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const mockModule = {
+      Agent: {
+        prototype: {
+          run: jest.fn().mockResolvedValue({
+            output: "Response with tools",
+            toolCalls: [
+              { name: "search", args: { query: "test" } },
+              { name: "calculate", args: { expression: "1+1" } },
+            ],
+          }),
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+});
