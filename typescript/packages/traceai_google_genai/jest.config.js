@@ -9,3 +9,8 @@ module.exports = {
     'src/**/*.ts',
     '!src/**/*.test.ts',
     '!src/__tests__/**',
+  ],
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'lcov'],
+  verbose: true,
+};
