@@ -288,3 +288,128 @@ async function batchEmbed(texts: string[]) {
 const embeddings = await batchEmbed([
   "First document text",
   "Second document text",
+  "Third document text",
+]);
+```
+
+### 7. Generation Configuration
+
+```typescript
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
+const model = genAI.getGenerativeModel({
+  model: "gemini-1.5-pro",
+  generationConfig: {
+    temperature: 0.7,
+    topP: 0.9,
+    topK: 40,
+    maxOutputTokens: 2000,
+    stopSequences: ["END"],
+  },
+});
+
+const result = await model.generateContent("Write a creative story");
+```
+
+### 8. Safety Settings
+
+```typescript
+import { HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
+
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
+const model = genAI.getGenerativeModel({
+  model: "gemini-1.5-pro",
+  safetySettings: [
+    {
+      category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+      threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+      threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+    },
+  ],
+});
+```
+
+## Traced Attributes
+
+The instrumentation captures the following attributes:
+
+| Attribute | Description |
+|-----------|-------------|
+| `llm.system` | Always "google_generative_ai" |
+| `llm.provider` | Always "google_generative_ai" |
+| `llm.model_name` | The model used |
+| `llm.input_messages` | Input messages with role and content |
+| `llm.output_messages` | Output messages with role and content |
+| `llm.invocation_parameters` | Generation config |
+| `llm.token_count.prompt` | Number of input tokens |
+| `llm.token_count.completion` | Number of output tokens |
+| `llm.token_count.total` | Total tokens used |
+| `llm.tools` | Tool/function definitions |
+| `embedding.model_name` | Embedding model used |
+| `embedding.embeddings` | Embedding text and vectors |
+
+## Integration with TraceAI Platform
+
+```typescript
+import { GoogleGenAIInstrumentation } from "@traceai/google-genai";
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+import { Resource } from "@opentelemetry/resources";
+
+const provider = new NodeTracerProvider({
+  resource: new Resource({
+    "service.name": "my-gemini-app",
+    "deployment.environment": "production",
+  }),
+});
+
+const exporter = new OTLPTraceExporter({
+  url: "https://api.traceai.com/v1/traces",
+  headers: {
+    Authorization: `Bearer ${process.env.TRACEAI_API_KEY}`,
+  },
+});
+
+provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+provider.register();
+
+const instrumentation = new GoogleGenAIInstrumentation();
+instrumentation.manuallyInstrument(require("@google/generative-ai"));
+```
+
+## Running Examples
+
+The `examples/` directory contains real-world examples:
+
+```bash
+cd examples
+cp .env.example .env
+# Edit .env with your API keys
+
+pnpm install
+pnpm run example
+```
+
+## E2E Testing
+
+Run E2E tests with real API keys:
+
+```bash
+GOOGLE_API_KEY=your_key pnpm test -- --testPathPattern=e2e
+```
+
+## License
+
+Apache-2.0
+
+## Related Packages
+
+- [@traceai/openai](../traceai_openai) - OpenAI instrumentation
+- [@traceai/anthropic](../traceai_anthropic) - Anthropic instrumentation
+- [@traceai/groq](../traceai_groq) - Groq instrumentation
+- [@traceai/mistral](../traceai_mistral) - Mistral instrumentation
+- [@traceai/cohere](../traceai_cohere) - Cohere instrumentation
+- [@traceai/fi-core](../fi-core) - Core tracing utilities
