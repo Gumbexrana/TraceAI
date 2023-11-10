@@ -162,3 +162,74 @@ async function main() {
             {
               name: "get_weather",
               description: "Get the current weather in a given location",
+              parameters: {
+                type: "object",
+                properties: {
+                  location: {
+                    type: "string",
+                    description: "The city name, e.g. Tokyo, New York",
+                  },
+                  unit: {
+                    type: "string",
+                    enum: ["celsius", "fahrenheit"],
+                    description: "The unit of temperature",
+                  },
+                },
+                required: ["location"],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const functionResult = await functionModel.generateContent("What's the weather in London?");
+    const functionResponse = await functionResult.response;
+
+    const functionCalls = functionResponse.functionCalls();
+    if (functionCalls && functionCalls.length > 0) {
+      console.log("Function calls:", JSON.stringify(functionCalls, null, 2));
+    } else {
+      console.log("Response:", functionResponse.text());
+    }
+    console.log();
+
+    // === Test Case 8: Embeddings ===
+    console.log("--- Test Case 8: Embeddings ---");
+    const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
+
+    const embeddingResult = await embeddingModel.embedContent("Hello, world!");
+    console.log("Embedding dimensions:", embeddingResult.embedding.values.length);
+    console.log("First 5 values:", embeddingResult.embedding.values.slice(0, 5));
+    console.log();
+
+    // === Test Case 9: Batch Embeddings ===
+    console.log("--- Test Case 9: Batch Embeddings ---");
+    const batchEmbeddingResult = await embeddingModel.batchEmbedContents({
+      requests: [
+        { content: { role: "user", parts: [{ text: "What is the meaning of life?" }] } },
+        { content: { role: "user", parts: [{ text: "How do computers work?" }] } },
+        { content: { role: "user", parts: [{ text: "Why is the sky blue?" }] } },
+      ],
+    });
+    console.log("Batch embeddings count:", batchEmbeddingResult.embeddings.length);
+    console.log("Each embedding dimensions:", batchEmbeddingResult.embeddings[0].values.length);
+    console.log();
+
+    console.log("--- All Test Cases Completed Successfully ---\n");
+
+  } catch (error) {
+    console.error("Error during Google GenAI API calls:", error);
+  } finally {
+    // 4. Shutdown the provider to ensure all spans are flushed
+    console.log("Shutting down tracer provider...");
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await tracerProvider.shutdown();
+    console.log("Tracer provider shut down successfully.");
+  }
+}
+
+main().catch((error) => {
+  console.error("Unhandled error:", error);
+  process.exit(1);
+});
