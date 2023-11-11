@@ -235,3 +235,359 @@ export class GoogleGenAIInstrumentation extends InstrumentationBase {
                 : args[0];
 
               const modelName = this.model || 'unknown';
+
+              const span = instrumentation.fiTracer.startSpan(
+                `Google GenAI generateContent`,
+                {
+                  kind: SpanKind.INTERNAL,
+                  attributes: {
+                    [SemanticConventions.FI_SPAN_KIND]: FISpanKind.LLM,
+                    [SemanticConventions.LLM_MODEL_NAME]: modelName,
+                    [SemanticConventions.INPUT_VALUE]: JSON.stringify(request),
+                    [SemanticConventions.INPUT_MIME_TYPE]: MimeType.JSON,
+                    [SemanticConventions.LLM_PROVIDER]: LLMProvider.GOOGLE_GENERATIVE_AI,
+                    [SemanticConventions.GEN_AI_OPERATION_NAME]: "chat",
+                    ...getLLMInputMessagesAttributes(request),
+                    ...getGenerationConfigAttributes(request),
+                    [SemanticConventions.RAW_INPUT]: safelyJSONStringify(request) ?? "",
+                  },
+                },
+              );
+
+              const execContext = getExecContext(span);
+              const execPromise = safeExecuteInTheMiddle(
+                () => {
+                  return context.with(trace.setSpan(execContext, span), () => {
+                    return original.apply(this, args);
+                  });
+                },
+                (error) => {
+                  if (error) {
+                    span.recordException(error);
+                    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+                    span.end();
+                  }
+                },
+              );
+
+              const wrappedPromise = (execPromise as Promise<GenerateContentResponse>).then((result) => {
+                span.setAttributes({
+                  [SemanticConventions.OUTPUT_VALUE]: result.response.text(),
+                  [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.TEXT,
+                  [SemanticConventions.GEN_AI_RESPONSE_MODEL]: result.response.candidates?.[0] ? modelName : modelName,
+                  ...getLLMOutputMessagesAttributes(result),
+                  ...getUsageAttributes(result),
+                  [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(result) ?? "",
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                span.end();
+                return result;
+              }).catch((error: Error) => {
+                span.recordException(error);
+                span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+                span.end();
+                throw error;
+              });
+
+              return context.bind(execContext, wrappedPromise);
+            };
+          },
+        );
+      }
+
+      // Patch embedContent method
+      if (typeof GenerativeModel.prototype.embedContent === 'function') {
+        this._wrap(
+          GenerativeModel.prototype,
+          "embedContent",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (original: any): any => {
+            return function patchedEmbedContent(
+              this: { model?: string },
+              ...args: [EmbedContentRequest | string]
+            ) {
+              const request = typeof args[0] === 'string'
+                ? { content: { parts: [{ text: args[0] }] } }
+                : args[0];
+
+              const modelName = this.model || 'unknown';
+              const inputText = request.content?.parts?.[0]?.text || '';
+
+              const span = instrumentation.fiTracer.startSpan(`Google GenAI embedContent`, {
+                kind: SpanKind.INTERNAL,
+                attributes: {
+                  [SemanticConventions.FI_SPAN_KIND]: FISpanKind.EMBEDDING,
+                  [SemanticConventions.EMBEDDING_MODEL_NAME]: modelName,
+                  [SemanticConventions.INPUT_VALUE]: inputText,
+                  [SemanticConventions.INPUT_MIME_TYPE]: MimeType.TEXT,
+                  [SemanticConventions.LLM_PROVIDER]: LLMProvider.GOOGLE_GENERATIVE_AI,
+                  [SemanticConventions.GEN_AI_OPERATION_NAME]: "embeddings",
+                  [`${SemanticConventions.EMBEDDING_EMBEDDINGS}.0.${SemanticConventions.EMBEDDING_TEXT}`]: inputText,
+                  [SemanticConventions.RAW_INPUT]: safelyJSONStringify(request) ?? "",
+                },
+              });
+
+              const execContext = getExecContext(span);
+              const execPromise = safeExecuteInTheMiddle(
+                () => {
+                  return context.with(trace.setSpan(execContext, span), () => {
+                    return original.apply(this, args);
+                  });
+                },
+                (error) => {
+                  if (error) {
+                    span.recordException(error);
+                    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+                    span.end();
+                  }
+                },
+              );
+
+              const wrappedPromise = (execPromise as Promise<EmbedContentResponse>).then((result) => {
+                span.setAttributes({
+                  [`${SemanticConventions.EMBEDDING_EMBEDDINGS}.0.${SemanticConventions.EMBEDDING_VECTOR}`]: result.embedding.values,
+                  [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(result) ?? "",
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                span.end();
+                return result;
+              }).catch((error: Error) => {
+                span.recordException(error);
+                span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+                span.end();
+                throw error;
+              });
+
+              return context.bind(execContext, wrappedPromise);
+            };
+          },
+        );
+      }
+
+      // Patch batchEmbedContents method
+      if (typeof GenerativeModel.prototype.batchEmbedContents === 'function') {
+        this._wrap(
+          GenerativeModel.prototype,
+          "batchEmbedContents",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (original: any): any => {
+            return function patchedBatchEmbedContents(
+              this: { model?: string },
+              ...args: [BatchEmbedContentsRequest]
+            ) {
+              const request = args[0];
+              const modelName = this.model || 'unknown';
+
+              const span = instrumentation.fiTracer.startSpan(`Google GenAI batchEmbedContents`, {
+                kind: SpanKind.INTERNAL,
+                attributes: {
+                  [SemanticConventions.FI_SPAN_KIND]: FISpanKind.EMBEDDING,
+                  [SemanticConventions.EMBEDDING_MODEL_NAME]: modelName,
+                  [SemanticConventions.INPUT_VALUE]: JSON.stringify(request),
+                  [SemanticConventions.INPUT_MIME_TYPE]: MimeType.JSON,
+                  [SemanticConventions.LLM_PROVIDER]: LLMProvider.GOOGLE_GENERATIVE_AI,
+                  [SemanticConventions.GEN_AI_OPERATION_NAME]: "embeddings",
+                  ...getBatchEmbeddingTextAttributes(request),
+                  [SemanticConventions.RAW_INPUT]: safelyJSONStringify(request) ?? "",
+                },
+              });
+
+              const execContext = getExecContext(span);
+              const execPromise = safeExecuteInTheMiddle(
+                () => {
+                  return context.with(trace.setSpan(execContext, span), () => {
+                    return original.apply(this, args);
+                  });
+                },
+                (error) => {
+                  if (error) {
+                    span.recordException(error);
+                    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+                    span.end();
+                  }
+                },
+              );
+
+              const wrappedPromise = (execPromise as Promise<BatchEmbedContentsResponse>).then((result) => {
+                span.setAttributes({
+                  ...getBatchEmbeddingVectorAttributes(result),
+                  [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(result) ?? "",
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                span.end();
+                return result;
+              }).catch((error: Error) => {
+                span.recordException(error);
+                span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+                span.end();
+                throw error;
+              });
+
+              return context.bind(execContext, wrappedPromise);
+            };
+          },
+        );
+      }
+    }
+
+    _isFIPatched = true;
+    try {
+      module.fiPatched = true;
+    } catch (e) {
+      diag.warn(`Failed to set fiPatched flag on module '${MODULE_NAME}'. Error: ${e}`);
+    }
+
+    return module;
+  }
+
+  /**
+   * Un-patches the Google GenAI module
+   */
+  private unpatch(
+    moduleExports: Record<string, unknown> & { fiPatched?: boolean },
+    moduleVersion?: string,
+  ) {
+    const GenerativeModel = moduleExports.GenerativeModel as {
+      prototype?: Record<string, unknown>;
+    } | undefined;
+
+    if (GenerativeModel?.prototype) {
+      if (GenerativeModel.prototype.generateContent) {
+        this._unwrap(GenerativeModel.prototype, "generateContent");
+      }
+      if (GenerativeModel.prototype.embedContent) {
+        this._unwrap(GenerativeModel.prototype, "embedContent");
+      }
+      if (GenerativeModel.prototype.batchEmbedContents) {
+        this._unwrap(GenerativeModel.prototype, "batchEmbedContents");
+      }
+    }
+
+    _isFIPatched = false;
+    try {
+      moduleExports.fiPatched = false;
+    } catch (e) {
+      diag.warn(`Failed to unset fiPatched flag on module '${MODULE_NAME}'. Error: ${e}`);
+    }
+  }
+}
+
+/**
+ * Converts the request to LLM input messages (JSON blob)
+ */
+function getLLMInputMessagesAttributes(request: GenerateContentRequest): Attributes {
+  const messages: Array<Record<string, unknown>> = [];
+
+  // Add system instruction if present
+  if (request.systemInstruction?.parts) {
+    const systemText = request.systemInstruction.parts.map(p => p.text).join('');
+    messages.push({ role: 'system', content: systemText });
+  }
+
+  // Add content messages
+  request.contents.forEach((content) => {
+    const textParts = content.parts.filter(p => p.text).map(p => p.text).join('');
+    const msg: Record<string, unknown> = { role: content.role || 'user' };
+    if (textParts) {
+      msg.content = textParts;
+    }
+    messages.push(msg);
+  });
+
+  const attributes: Attributes = {
+    [SemanticConventions.LLM_INPUT_MESSAGES]: safelyJSONStringify(messages) ?? "[]",
+  };
+
+  // Add tools if present
+  if (request.tools) {
+    const allFunctions = request.tools.flatMap(tool => tool.functionDeclarations || []);
+    if (allFunctions.length > 0) {
+      attributes[SemanticConventions.LLM_TOOLS] = safelyJSONStringify(allFunctions) ?? "[]";
+    }
+  }
+
+  return attributes;
+}
+
+/**
+ * Gets generation config attributes
+ */
+function getGenerationConfigAttributes(request: GenerateContentRequest): Attributes {
+  if (!request.generationConfig) {
+    return {};
+  }
+  return {
+    [SemanticConventions.LLM_INVOCATION_PARAMETERS]: JSON.stringify(request.generationConfig),
+  };
+}
+
+/**
+ * Gets usage attributes from response
+ */
+function getUsageAttributes(result: GenerateContentResponse): Attributes {
+  const usage = result.response.usageMetadata;
+  if (!usage) {
+    return {};
+  }
+  return {
+    [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]: usage.promptTokenCount,
+    [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]: usage.candidatesTokenCount,
+    [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]: usage.totalTokenCount,
+  };
+}
+
+/**
+ * Converts the response to LLM output messages (JSON blob)
+ */
+function getLLMOutputMessagesAttributes(result: GenerateContentResponse): Attributes {
+  const candidate = result.response.candidates?.[0];
+  if (!candidate) {
+    return {};
+  }
+
+  const msg: Record<string, unknown> = { role: candidate.content.role || 'model' };
+
+  const textParts = candidate.content.parts.filter(p => p.text).map(p => p.text).join('');
+  if (textParts) {
+    msg.content = textParts;
+  }
+
+  // Handle function calls
+  const toolCalls = candidate.content.parts
+    .filter(part => part.functionCall)
+    .map(part => ({
+      function: { name: part.functionCall!.name, arguments: JSON.stringify(part.functionCall!.args) },
+    }));
+  if (toolCalls.length > 0) {
+    msg.tool_calls = toolCalls;
+  }
+
+  return {
+    [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify([msg]) ?? "[]",
+    [SemanticConventions.GEN_AI_RESPONSE_FINISH_REASONS]: safelyJSONStringify(
+      result.response.candidates?.map(c => c.finishReason).filter(Boolean)
+    ) ?? "[]",
+  };
+}
+
+/**
+ * Gets batch embedding text attributes
+ */
+function getBatchEmbeddingTextAttributes(request: BatchEmbedContentsRequest): Attributes {
+  return request.requests.reduce((acc, req, index) => {
+    const text = req.content?.parts?.[0]?.text || '';
+    acc[`${SemanticConventions.EMBEDDING_EMBEDDINGS}.${index}.${SemanticConventions.EMBEDDING_TEXT}`] = text;
+    return acc;
+  }, {} as Attributes);
+}
+
+/**
+ * Gets batch embedding vector attributes
+ */
+function getBatchEmbeddingVectorAttributes(response: BatchEmbedContentsResponse): Attributes {
+  return response.embeddings.reduce((acc, embedding, index) => {
+    acc[`${SemanticConventions.EMBEDDING_EMBEDDINGS}.${index}.${SemanticConventions.EMBEDDING_VECTOR}`] =
+      embedding.values;
+    return acc;
+  }, {} as Attributes);
+}
