@@ -342,3 +342,151 @@ function isChatCompletionResponse(
 ): response is GroqChatCompletion {
   return "choices" in response && Array.isArray((response as GroqChatCompletion).choices);
 }
+
+/**
+ * Type guard for stream response
+ */
+function isStreamResponse(
+  response: GroqChatCompletion | GroqStream<GroqChatCompletionChunk>,
+): response is GroqStream<GroqChatCompletionChunk> {
+  return typeof (response as GroqStream<GroqChatCompletionChunk>)[Symbol.asyncIterator] === "function";
+}
+
+/**
+ * Converts the body of a chat completions request to LLM input messages
+ */
+function getLLMInputMessagesAttributes(
+  body: GroqChatCompletionCreateParams,
+): Attributes {
+  const serialized = body.messages.map((message) => {
+    const obj: Record<string, unknown> = { role: message.role };
+    if (message.content) {
+      obj.content = message.content;
+    }
+    if (message.tool_call_id) {
+      obj.tool_call_id = message.tool_call_id;
+    }
+    return obj;
+  });
+  return { [SemanticConventions.LLM_INPUT_MESSAGES]: safelyJSONStringify(serialized) ?? "[]" };
+}
+
+/**
+ * Converts each tool definition into a json schema
+ */
+function getLLMToolsJSONSchema(
+  body: GroqChatCompletionCreateParams,
+): Attributes {
+  if (!body.tools) {
+    return {};
+  }
+  return { [SemanticConventions.LLM_TOOLS]: safelyJSONStringify(body.tools) ?? "[]" };
+}
+
+/**
+ * Get usage attributes from completion response
+ */
+function getUsageAttributes(completion: GroqChatCompletion): Attributes {
+  if (completion.usage) {
+    return {
+      [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]:
+        completion.usage.completion_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]:
+        completion.usage.prompt_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]:
+        completion.usage.total_tokens,
+    };
+  }
+  return {};
+}
+
+/**
+ * Converts the chat completion result to LLM output attributes
+ */
+function getChatCompletionLLMOutputMessagesAttributes(
+  chatCompletion: GroqChatCompletion,
+): Attributes {
+  const choice = chatCompletion.choices[0];
+  if (!choice) {
+    return {};
+  }
+
+  const msg: Record<string, unknown> = { role: choice.message.role };
+  if (choice.message.content) {
+    msg.content = choice.message.content;
+  }
+  if (choice.message.tool_calls) {
+    msg.tool_calls = choice.message.tool_calls.map((tc) => ({
+      id: tc.id,
+      function: { name: tc.function.name, arguments: tc.function.arguments },
+    }));
+  }
+  return { [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify([msg]) ?? "[]" };
+}
+
+/**
+ * Consumes the stream chunks and adds them to the span
+ */
+async function consumeChatCompletionStreamChunks(
+  stream: GroqStream<GroqChatCompletionChunk>,
+  span: Span,
+) {
+  let streamResponse = "";
+  const toolCalls: Record<number, { id?: string; name?: string; arguments?: string }> = {};
+  const allChunks: GroqChatCompletionChunk[] = [];
+
+  try {
+    for await (const chunk of stream) {
+      allChunks.push(chunk);
+      if (chunk.choices.length <= 0) {
+        continue;
+      }
+      const choice = chunk.choices[0];
+      if (choice.delta?.content) {
+        streamResponse += choice.delta.content;
+      }
+
+      if (choice.delta?.tool_calls) {
+        choice.delta.tool_calls.forEach((toolCall, index) => {
+          if (!toolCalls[index]) {
+            toolCalls[index] = {};
+          }
+          if (toolCall.id) {
+            toolCalls[index].id = toolCall.id;
+          }
+          if (toolCall.function?.name) {
+            toolCalls[index].name = (toolCalls[index].name || "") + toolCall.function.name;
+          }
+          if (toolCall.function?.arguments) {
+            toolCalls[index].arguments = (toolCalls[index].arguments || "") + toolCall.function.arguments;
+          }
+        });
+      }
+    }
+  } catch (error) {
+    span.recordException(error as Error);
+    span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+    span.end();
+    return;
+  }
+
+  const msg: Record<string, unknown> = { role: "assistant", content: streamResponse };
+  const toolCallEntries = Object.values(toolCalls);
+  if (toolCallEntries.length > 0) {
+    msg.tool_calls = toolCallEntries.map((tc) => ({
+      id: tc.id,
+      function: { name: tc.name, arguments: tc.arguments },
+    }));
+  }
+
+  const attributes: Attributes = {
+    [SemanticConventions.OUTPUT_VALUE]: streamResponse,
+    [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.TEXT,
+    [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify([msg]) ?? "[]",
+    [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(allChunks) ?? "",
+  };
+
+  span.setAttributes(attributes);
+  span.setStatus({ code: SpanStatusCode.OK });
+  span.end();
+}
