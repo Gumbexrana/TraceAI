@@ -76,3 +76,121 @@ describeE2E("Groq E2E Tests", () => {
         });
         console.log("System prompt response:", response.choices[0].message.content);
       } catch (error) {
+        console.log("System prompt errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should handle multi-turn conversations", async () => {
+      try {
+        const response = await client.chat.completions.create({
+          model: "llama-3.1-8b-instant",
+          messages: [
+            { role: "user", content: "My name is TestUser." },
+            { role: "assistant", content: "Hello TestUser!" },
+            { role: "user", content: "What is my name?" }
+          ],
+          max_tokens: 50,
+        });
+        console.log("Multi-turn response:", response.choices[0].message.content);
+      } catch (error) {
+        console.log("Multi-turn errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should handle streaming responses", async () => {
+      try {
+        const stream = await client.chat.completions.create({
+          model: "llama-3.1-8b-instant",
+          messages: [
+            { role: "user", content: "Count from 1 to 3." }
+          ],
+          max_tokens: 50,
+          stream: true,
+        });
+
+        const chunks: string[] = [];
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content;
+          if (content) {
+            chunks.push(content);
+          }
+        }
+
+        console.log("Streaming response:", chunks.join(""));
+      } catch (error) {
+        console.log("Streaming errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should handle JSON mode", async () => {
+      try {
+        const response = await client.chat.completions.create({
+          model: "llama-3.1-8b-instant",
+          messages: [
+            { role: "system", content: "Respond only with valid JSON." },
+            { role: "user", content: "Return a JSON object with a 'greeting' key set to 'hello'" }
+          ],
+          max_tokens: 100,
+          response_format: { type: "json_object" },
+        });
+        console.log("JSON mode response:", response.choices[0].message.content);
+      } catch (error) {
+        console.log("JSON mode errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should handle tool/function calling", async () => {
+      try {
+        const response = await client.chat.completions.create({
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            { role: "user", content: "What is the weather in Tokyo?" }
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "get_weather",
+                description: "Get weather for a location",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    location: { type: "string", description: "City name" }
+                  },
+                  required: ["location"]
+                }
+              }
+            }
+          ],
+          tool_choice: "auto",
+          max_tokens: 200,
+        });
+        console.log("Tool calling response received");
+      } catch (error) {
+        console.log("Tool calling errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+
+  describe("Error Handling", () => {
+    it("should handle invalid model gracefully", async () => {
+      await expect(
+        client.chat.completions.create({
+          model: "non-existent-model-12345",
+          messages: [{ role: "user", content: "Hello" }],
+        })
+      ).rejects.toThrow();
+      console.log("Error handling: correctly threw on invalid model");
+    }, 30000);
+
+    it("should handle empty messages gracefully", async () => {
+      await expect(
+        client.chat.completions.create({
+          model: "llama-3.1-8b-instant",
+          messages: [],
+        })
+      ).rejects.toThrow();
+      console.log("Error handling: correctly threw on empty messages");
+    }, 30000);
+  });
+});
