@@ -681,3 +681,297 @@ export class HuggingFaceInstrumentation extends InstrumentationBase {
           span.end();
           throw error;
         });
+
+        return context.bind(execContext, wrappedPromise) as Promise<HFSummarizationOutput>;
+      };
+    };
+  }
+
+  /**
+   * Creates a wrapper for translation
+   */
+  private createTranslationWrapper(instrumentation: HuggingFaceInstrumentation) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (original: any): any => {
+      return function patchedTranslation(
+        this: unknown,
+        args: HFTranslationInput,
+      ) {
+        const span = instrumentation.fiTracer.startSpan(
+          `HuggingFace Translation`,
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              [SemanticConventions.FI_SPAN_KIND]: FISpanKind.LLM,
+              [SemanticConventions.LLM_MODEL_NAME]: args.model ?? "unknown",
+              [SemanticConventions.INPUT_VALUE]: args.inputs,
+              [SemanticConventions.INPUT_MIME_TYPE]: MimeType.TEXT,
+              [SemanticConventions.LLM_PROVIDER]: LLMProvider.HUGGINGFACE,
+              [SemanticConventions.RAW_INPUT]: safelyJSONStringify(args) ?? "",
+            },
+          },
+        );
+
+        const execContext = getExecContext(span);
+        const execPromise = safeExecuteInTheMiddle(
+          () => {
+            return context.with(trace.setSpan(execContext, span), () => {
+              return original.apply(this, [args]);
+            });
+          },
+          (error) => {
+            if (error) {
+              span.recordException(error);
+              span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+              span.end();
+            }
+          },
+        );
+
+        const wrappedPromise = (execPromise as Promise<HFTranslationOutput>).then((result) => {
+          span.setAttributes({
+            [SemanticConventions.OUTPUT_VALUE]: result.translation_text,
+            [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.TEXT,
+            [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(result) ?? "",
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+          span.end();
+          return result;
+        }).catch((error: Error) => {
+          span.recordException(error);
+          span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+          span.end();
+          throw error;
+        });
+
+        return context.bind(execContext, wrappedPromise) as Promise<HFTranslationOutput>;
+      };
+    };
+  }
+
+  /**
+   * Creates a wrapper for questionAnswering
+   */
+  private createQuestionAnsweringWrapper(instrumentation: HuggingFaceInstrumentation) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (original: any): any => {
+      return function patchedQuestionAnswering(
+        this: unknown,
+        args: HFQuestionAnsweringInput,
+      ) {
+        const span = instrumentation.fiTracer.startSpan(
+          `HuggingFace Question Answering`,
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              [SemanticConventions.FI_SPAN_KIND]: FISpanKind.LLM,
+              [SemanticConventions.LLM_MODEL_NAME]: args.model ?? "unknown",
+              [SemanticConventions.INPUT_VALUE]: JSON.stringify(args.inputs),
+              [SemanticConventions.INPUT_MIME_TYPE]: MimeType.JSON,
+              [SemanticConventions.LLM_PROVIDER]: LLMProvider.HUGGINGFACE,
+              [SemanticConventions.RAW_INPUT]: safelyJSONStringify(args) ?? "",
+            },
+          },
+        );
+
+        const execContext = getExecContext(span);
+        const execPromise = safeExecuteInTheMiddle(
+          () => {
+            return context.with(trace.setSpan(execContext, span), () => {
+              return original.apply(this, [args]);
+            });
+          },
+          (error) => {
+            if (error) {
+              span.recordException(error);
+              span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+              span.end();
+            }
+          },
+        );
+
+        const wrappedPromise = (execPromise as Promise<HFQuestionAnsweringOutput>).then((result) => {
+          span.setAttributes({
+            [SemanticConventions.OUTPUT_VALUE]: result.answer,
+            [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.TEXT,
+            [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(result) ?? "",
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+          span.end();
+          return result;
+        }).catch((error: Error) => {
+          span.recordException(error);
+          span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+          span.end();
+          throw error;
+        });
+
+        return context.bind(execContext, wrappedPromise) as Promise<HFQuestionAnsweringOutput>;
+      };
+    };
+  }
+
+  /**
+   * Un-patches the HuggingFace module
+   */
+  private unpatch(
+    moduleExports: Record<string, unknown> & { fiPatched?: boolean },
+    moduleVersion?: string,
+  ) {
+    const HfInference = moduleExports.HfInference as {
+      prototype: Record<string, unknown>;
+    } | undefined;
+
+    const methodsToUnpatch = [
+      "textGeneration",
+      "chatCompletion",
+      "chatCompletionStream",
+      "featureExtraction",
+      "summarization",
+      "translation",
+      "questionAnswering",
+    ];
+
+    if (HfInference?.prototype) {
+      methodsToUnpatch.forEach((method) => {
+        if (typeof HfInference.prototype[method] === "function") {
+          this._unwrap(HfInference.prototype, method);
+        }
+      });
+    }
+
+    const InferenceClient = moduleExports.InferenceClient as {
+      prototype: Record<string, unknown>;
+    } | undefined;
+
+    if (InferenceClient?.prototype) {
+      methodsToUnpatch.forEach((method) => {
+        if (typeof InferenceClient.prototype[method] === "function") {
+          this._unwrap(InferenceClient.prototype, method);
+        }
+      });
+    }
+
+    _isFIPatched = false;
+    try {
+      moduleExports.fiPatched = false;
+    } catch (e) {
+      diag.warn(`Failed to unset fiPatched flag on module '${MODULE_NAME}'. Error: ${e}`);
+    }
+  }
+}
+
+/**
+ * Wraps a chat stream to capture the full response
+ */
+async function* wrapChatStream(
+  stream: HFStream<HFChatCompletionStreamOutput>,
+  span: Span,
+): AsyncGenerator<HFChatCompletionStreamOutput, void, unknown> {
+  let fullContent = "";
+  const allChunks: HFChatCompletionStreamOutput[] = [];
+
+  try {
+    for await (const chunk of stream) {
+      allChunks.push(chunk);
+      const choice = chunk.choices?.[0];
+      if (choice?.delta?.content) {
+        fullContent += choice.delta.content;
+      }
+      yield chunk;
+    }
+  } catch (error) {
+    span.recordException(error as Error);
+    span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+    span.end();
+    throw error;
+  }
+
+  const attributes: Attributes = {
+    [SemanticConventions.OUTPUT_VALUE]: fullContent,
+    [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.TEXT,
+    [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify([{ role: "assistant", content: fullContent }]) ?? "[]",
+    [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(allChunks) ?? "",
+  };
+
+  span.setAttributes(attributes);
+  span.setStatus({ code: SpanStatusCode.OK });
+  span.end();
+}
+
+/**
+ * Gets input message attributes for chat requests (JSON blob)
+ */
+function getChatInputMessagesAttributes(request: HFChatCompletionInput): Attributes {
+  const serialized = request.messages.map((message) => {
+    const obj: Record<string, unknown> = { role: message.role };
+    if (message.content) {
+      obj.content = message.content;
+    }
+    return obj;
+  });
+  return { [SemanticConventions.LLM_INPUT_MESSAGES]: safelyJSONStringify(serialized) ?? "[]" };
+}
+
+/**
+ * Gets output message attributes from chat response (JSON blob)
+ */
+function getChatOutputMessagesAttributes(response: HFChatCompletionOutput): Attributes {
+  const choice = response.choices[0];
+  if (!choice) {
+    return {};
+  }
+
+  const msg: Record<string, unknown> = { role: choice.message.role };
+  if (choice.message.content) {
+    msg.content = choice.message.content;
+  }
+
+  return { [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify([msg]) ?? "[]" };
+}
+
+/**
+ * Gets usage attributes from chat response
+ */
+function getUsageAttributes(response: HFChatCompletionOutput): Attributes {
+  if (response.usage) {
+    return {
+      [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]: response.usage.completion_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]: response.usage.prompt_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]: response.usage.total_tokens,
+    };
+  }
+  return {};
+}
+
+/**
+ * Gets embedding input attributes
+ */
+function getEmbeddingInputAttributes(texts: string[]): Attributes {
+  return texts.reduce((acc: Attributes, text, index) => {
+    acc[`${SemanticConventions.EMBEDDING_EMBEDDINGS}.${index}.${SemanticConventions.EMBEDDING_TEXT}`] = text;
+    return acc;
+  }, {});
+}
+
+/**
+ * Gets embedding output attributes
+ */
+function getEmbeddingOutputAttributes(result: number[] | number[][], inputCount: number): Attributes {
+  const attributes: Attributes = {};
+
+  // Handle both single embedding and batch embeddings
+  if (inputCount === 1 && !Array.isArray(result[0])) {
+    // Single embedding
+    attributes[`${SemanticConventions.EMBEDDING_EMBEDDINGS}.0.${SemanticConventions.EMBEDDING_VECTOR}`] =
+      JSON.stringify(result);
+  } else {
+    // Batch embeddings
+    (result as number[][]).forEach((embedding, index) => {
+      attributes[`${SemanticConventions.EMBEDDING_EMBEDDINGS}.${index}.${SemanticConventions.EMBEDDING_VECTOR}`] =
+        JSON.stringify(embedding);
+    });
+  }
+
+  return attributes;
+}
