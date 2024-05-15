@@ -31,3 +31,53 @@ async function main() {
 
   console.log("Instructor instrumentation example");
   console.log("==================================");
+  console.log("");
+  console.log("This example demonstrates how to set up Instructor instrumentation.");
+  console.log("To run this with actual Instructor calls, you would:");
+  console.log("");
+  console.log("1. Install the required packages:");
+  console.log("   npm install @instructor-ai/instructor openai zod");
+  console.log("");
+  console.log("2. Set up your environment:");
+  console.log("   export OPENAI_API_KEY=your-api-key");
+  console.log("");
+  console.log("3. Uncomment the code below and run:");
+  console.log("");
+
+  /*
+  import { z } from "zod";
+
+  // Define the schema for structured extraction
+  const UserSchema = z.object({
+    name: z.string(),
+    age: z.number(),
+    email: z.string().email(),
+  });
+
+  // Create the instructor client
+  const openai = new OpenAI();
+  const client = Instructor({
+    client: openai,
+    mode: "FUNCTIONS",
+  });
+
+  // Extract structured data - will be traced
+  const user = await client.chat.completions.create({
+    model: "gpt-4",
+    messages: [
+      {
+        role: "user",
+        content: "John Doe is 30 years old and his email is john@example.com",
+      },
+    ],
+    response_model: { schema: UserSchema, name: "User" },
+  });
+
+  console.log("Extracted user:", user);
+  // Output: { name: "John Doe", age: 30, email: "john@example.com" }
+  */
+
+  console.log("Instrumentation is active and ready to trace Instructor calls.");
+}
+
+main().catch(console.error);
