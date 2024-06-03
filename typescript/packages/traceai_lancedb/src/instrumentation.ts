@@ -140,3 +140,64 @@ export class LanceDBInstrumentation extends InstrumentationBase {
       [SemanticConventions.FI_SPAN_KIND]: "VECTOR_DB",
     };
     if (tableName) {
+      attrs["db.collection.name"] = tableName;
+    }
+    return attrs;
+  }
+
+  private async _wrapMethod(
+    thisArg: any,
+    original: Function,
+    operation: LanceDBOperation,
+    args: any[],
+    tableName?: string
+  ): Promise<any> {
+    const attributes = this.getCommonAttributes(operation, tableName);
+    const params = args[0];
+
+    // Operation-specific attributes
+    if (operation === "search") {
+      if (params?.limit) attributes["db.vector.query.top_k"] = params.limit;
+      if (Array.isArray(params) && params.length > 0) {
+        attributes["db.vector.query.dimensions"] = params.length;
+      }
+    }
+
+    if (operation === "add") {
+      if (Array.isArray(params)) {
+        attributes["db.operation.batch_size"] = params.length;
+      }
+    }
+
+    if (operation === "createTable" && typeof params === "string") {
+      attributes["db.collection.name"] = params;
+    }
+
+    const span = this.fiTracer.startSpan(`lancedb ${operation}`, {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.apply(thisArg, args)
+      );
+
+      if (Array.isArray(result)) {
+        span.setAttribute("db.response.returned_rows", result.length);
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error?.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+}
+
+export default LanceDBInstrumentation;
