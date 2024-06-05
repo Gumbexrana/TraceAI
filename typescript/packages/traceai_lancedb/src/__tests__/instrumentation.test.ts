@@ -107,3 +107,51 @@ describe("LanceDB Instrumentation", () => {
           },
         },
         Connection: {
+          prototype: {
+            createTable: jest.fn(),
+          },
+        },
+      };
+      instrumentation.manuallyInstrument(mockModule);
+      expect(isPatched()).toBe(true);
+    });
+  });
+
+  describe("Search Operation", () => {
+    it("should create span for search operation", async () => {
+      const mockTable = {
+        name: "test_table",
+        search: (jest.fn() as MockFn).mockResolvedValue([]),
+      };
+      const mockModule = {
+        Table: { prototype: { search: mockTable.search } },
+      };
+      instrumentation.manuallyInstrument(mockModule);
+
+      await mockModule.Table.prototype.search.call(mockTable, { limit: 10 });
+
+      expect(mockSpan.setStatus).toHaveBeenCalledWith({ code: 1 });
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("Error Handling", () => {
+    it("should record exception on error", async () => {
+      const error = new Error("Search failed");
+      const mockTable = {
+        search: (jest.fn() as MockFn).mockRejectedValue(error),
+      };
+      const mockModule = {
+        Table: { prototype: { search: mockTable.search } },
+      };
+      instrumentation.manuallyInstrument(mockModule);
+
+      await expect(
+        mockModule.Table.prototype.search.call(mockTable, {})
+      ).rejects.toThrow("Search failed");
+
+      expect(mockSpan.recordException).toHaveBeenCalledWith(error);
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+});
