@@ -19,3 +19,12 @@ module.exports = {
     '^.+\\.ts$': ['ts-jest', {
       tsconfig: {
         module: 'commonjs'
+      }
+    }]
+  },
+  moduleNameMapper: {
+    '^@traceai/fi-core$': '<rootDir>/../fi-core/src',
+    '^@traceai/fi-semantic-conventions$': '<rootDir>/../fi-semantic-conventions/src'
+  },
+  testTimeout: 10000
+}; 
