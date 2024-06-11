@@ -75,3 +75,37 @@ FI_API_KEY=your_api_key
 FI_SECRET_KEY=your_secret_key
 ```
 
+
+
+## Features
+
+- Automatic tracing of LangChain operations
+- Support for both ESM and CommonJS modules
+- Compatible with LangChain.js v0.2.0 and v0.3.0
+- Integration with TraceAI's observability platform
+
+## Peer Dependencies
+
+This package requires the following peer dependencies:
+- `@langchain/core`: ^0.2.0 || ^0.3.0
+
+## Development
+
+```bash
+# Install dependencies
+pnpm install
+
+# Build the package
+pnpm build
+
+# Run tests
+pnpm test
+
+# Type checking
+pnpm type:check
+```
+
+## Support
+
+For support, please open an issue in our [GitHub repository](https://github.com/future-agi/traceAI/issues).
+
