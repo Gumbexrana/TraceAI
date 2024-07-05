@@ -54,3 +54,27 @@ const main = async () => {
   const response = await chatModel.invoke([request]);
 
   // get a new response, including a greeting in the message history
+  const finalResponse = await chatModel.invoke([
+    request,
+    response,
+    new HumanMessage("That is great to hear!"),
+  ]);
+
+  // eslint-disable-next-line no-console
+  console.log(finalResponse.content);
+
+  // 4. Shutdown the provider to ensure spans are flushed
+  try {
+    await tracerProvider.shutdown();
+    console.log("Tracer provider shut down successfully.");
+  } catch (error) {
+    console.error("Error shutting down tracer provider:", error);
+  }
+
+  return finalResponse;
+};
+
+main().catch((error) => {
+  console.error("Unhandled error in main function:", error);
+  process.exit(1);
+});
