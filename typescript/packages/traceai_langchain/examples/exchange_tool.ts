@@ -84,3 +84,40 @@ const main = async () => {
     projectName: "langchain-test03",
     projectType: ProjectType.OBSERVE,
   });
+
+  // 2. Register LangChain Instrumentation
+  registerInstrumentations({
+    tracerProvider: tracerProvider,
+    instrumentations: [new LangChainInstrumentation()],
+  });
+
+  // 3. Create agent with exchange rate tool
+  const tools = [getExchangeRate];
+  const agentExecutor = await createAgent(tools);
+
+  // 4. Execute the agent
+  try {
+    const result = await agentExecutor.invoke({
+      input: "What is the exchange rate from US dollars to Swedish currency today?"
+    });
+    // console.log("Agent result:", result);
+    return result;
+  } catch (error) {
+    console.error("Error executing agent:", error);
+    throw error;
+  } finally {
+    // 5. Shutdown the provider to ensure spans are flushed
+    try {
+      await tracerProvider.shutdown();
+      // console.log("Tracer provider shut down successfully.");
+    } catch (error) {
+      console.error("Error shutting down tracer provider:", error);
+    }
+  }
+};
+
+// Run the main function
+main().catch((error) => {
+  console.error("Unhandled error in main function:", error);
+  process.exit(1);
+});
