@@ -26,3 +26,15 @@ provider.addSpanProcessor(
   new SimpleSpanProcessor(
     new OTLPTraceExporter({
       url: "http://localhost:8000/tracer/observation-span/create_otel_span/",
+    }),
+  ),
+);
+
+const lcInstrumentation = new LangChainInstrumentation();
+// LangChain must be manually instrumented as it doesn't have a traditional module structure
+lcInstrumentation.manuallyInstrument(CallbackManagerModule);
+
+// provider.register();
+
+// eslint-disable-next-line no-console
+console.log("👀 TraceAI initialized");
