@@ -19,3 +19,12 @@ const main = async () => {
     request,
     response,
     new HumanMessage("That is great to hear!"),
+  ]);
+
+  // eslint-disable-next-line no-console
+  console.log(finalResponse.content);
+
+  return finalResponse;
+};
+
+main();
