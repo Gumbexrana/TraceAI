@@ -16,3 +16,30 @@ export function addTracerToHandlers(
 ): CallbackManagerModuleV02.Callbacks;
 export function addTracerToHandlers(
   tracer: FITracer,
+  handlers?: CallbackManagerModuleV02.Callbacks,
+): CallbackManagerModuleV02.Callbacks {
+  if (handlers == null) {
+    return [new LangChainTracer(tracer)];
+  }
+  if (Array.isArray(handlers)) {
+    const tracerAlreadyRegistered = handlers.some(
+      (handler) => handler instanceof LangChainTracer,
+    );
+    if (!tracerAlreadyRegistered) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      handlers.push(new LangChainTracer(tracer) as any);
+    }
+    return handlers;
+  }
+  const tracerAlreadyRegistered =
+    handlers.inheritableHandlers.some(
+      (handler) => handler instanceof LangChainTracer,
+    ) ||
+    handlers.handlers.some((handler) => handler instanceof LangChainTracer);
+  if (tracerAlreadyRegistered) {
+    return handlers;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handlers.addHandler(new LangChainTracer(tracer) as any, true);
+  return handlers;
+}
