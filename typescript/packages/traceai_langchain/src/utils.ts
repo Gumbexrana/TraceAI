@@ -321,3 +321,488 @@ function formatInputMessages(
     const serialized = parsedMessages.map((msg) => {
       const obj: Record<string, unknown> = {};
       if (msg[SemanticConventions.MESSAGE_ROLE]) obj.role = msg[SemanticConventions.MESSAGE_ROLE];
+      if (msg[SemanticConventions.MESSAGE_CONTENT]) obj.content = msg[SemanticConventions.MESSAGE_CONTENT];
+      if (msg[SemanticConventions.MESSAGE_FUNCTION_CALL_NAME]) {
+        obj.function_call = {
+          name: msg[SemanticConventions.MESSAGE_FUNCTION_CALL_NAME],
+          arguments: msg[SemanticConventions.MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON],
+        };
+      }
+      if (msg[SemanticConventions.MESSAGE_TOOL_CALLS]) {
+        obj.tool_calls = msg[SemanticConventions.MESSAGE_TOOL_CALLS]?.map((tc) => ({
+          function: {
+            name: tc[SemanticConventions.TOOL_CALL_FUNCTION_NAME],
+            arguments: tc[SemanticConventions.TOOL_CALL_FUNCTION_ARGUMENTS_JSON],
+          },
+        }));
+      }
+      return obj;
+    });
+    return { [SemanticConventions.LLM_INPUT_MESSAGES]: safelyJSONStringify(serialized) ?? "[]" } as LLMMessagesAttributes;
+  }
+
+  return null;
+}
+
+/**
+ * Gets the first generation of the output of a langchain run.
+ * @param output - The output of a langchain run.
+ * @returns The first generation of the output or null.
+ */
+function getFirstOutputGeneration(output: Run["outputs"]) {
+  if (!isObject(output)) {
+    return null;
+  }
+  const maybeGenerations = output.generations;
+  if (!isNonEmptyArray(maybeGenerations)) {
+    return null;
+  }
+  // Only support the first 'set' of generations
+  const firstGeneration = maybeGenerations[0];
+  if (!isNonEmptyArray(firstGeneration)) {
+    return null;
+  }
+  return firstGeneration;
+}
+
+/**
+ * Formats the output messages of a langchain run into FI attributes.
+ * @param output - The output of a langchain run.
+ * @returns The FI attributes for the output messages.
+ */
+function formatOutputMessages(
+  output: Run["outputs"],
+): LLMMessagesAttributes | null {
+  const firstGeneration = getFirstOutputGeneration(output);
+  if (firstGeneration == null) {
+    return null;
+  }
+  const parsedMessages: LLMMessage[] = [];
+  firstGeneration.forEach((generation) => {
+    if (!isObject(generation) || !isObject(generation.message)) {
+      return;
+    }
+    parsedMessages.push(parseMessage(generation.message));
+  });
+
+  if (parsedMessages.length > 0) {
+    // Convert to JSON blob format for gen_ai.output.messages
+    const serialized = parsedMessages.map((msg) => {
+      const obj: Record<string, unknown> = {};
+      if (msg[SemanticConventions.MESSAGE_ROLE]) obj.role = msg[SemanticConventions.MESSAGE_ROLE];
+      if (msg[SemanticConventions.MESSAGE_CONTENT]) obj.content = msg[SemanticConventions.MESSAGE_CONTENT];
+      if (msg[SemanticConventions.MESSAGE_FUNCTION_CALL_NAME]) {
+        obj.function_call = {
+          name: msg[SemanticConventions.MESSAGE_FUNCTION_CALL_NAME],
+          arguments: msg[SemanticConventions.MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON],
+        };
+      }
+      if (msg[SemanticConventions.MESSAGE_TOOL_CALLS]) {
+        obj.tool_calls = msg[SemanticConventions.MESSAGE_TOOL_CALLS]?.map((tc) => ({
+          function: {
+            name: tc[SemanticConventions.TOOL_CALL_FUNCTION_NAME],
+            arguments: tc[SemanticConventions.TOOL_CALL_FUNCTION_ARGUMENTS_JSON],
+          },
+        }));
+      }
+      return obj;
+    });
+    return { [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify(serialized) ?? "[]" } as LLMMessagesAttributes;
+  }
+
+  return null;
+}
+
+/**
+ * Parses a langchain retrieval document into FI attributes.
+ * @param document - The langchain retrieval document to parse
+ * @returns The FI attributes for the retrieval document
+ */
+function parseRetrievalDocument(document: unknown) {
+  if (!isObject(document)) {
+    return null;
+  }
+  const parsedDocument: RetrievalDocument = {};
+  if (isString(document.pageContent)) {
+    parsedDocument["document.content"] = document.pageContent;
+  }
+  if (isObject(document.metadata)) {
+    parsedDocument["document.metadata"] =
+      safelyJSONStringify(document.metadata) ?? undefined;
+  }
+  return parsedDocument;
+}
+
+/**
+ * Formats the retrieval documents of a langchain run into FI attributes.
+ * @param run - The langchain run to extract the retrieval documents from
+ * @returns The FI attributes for the retrieval documents.
+ */
+function formatRetrievalDocuments(run: Run) {
+  const normalizedRunType = run.run_type.toLowerCase();
+  if (normalizedRunType !== "retriever") {
+    return null;
+  }
+  if (!isObject(run.outputs) || !Array.isArray(run.outputs.documents)) {
+    return null;
+  }
+  return {
+    [RETRIEVAL_DOCUMENTS]: run.outputs.documents
+      .map(parseRetrievalDocument)
+      .filter((doc) => doc != null),
+  };
+}
+
+/**
+ * Gets the model name from the langchain run extra data.
+ * @param runExtra - The extra data from a langchain run
+ * @returns The FI attributes for the model name
+ */
+function formatLLMParams(
+  runExtra: Run["extra"],
+): LLMParameterAttributes | null {
+  if (!isObject(runExtra) || !isObject(runExtra.invocation_params)) {
+    return null;
+  }
+  const fiParams: LLMParameterAttributes = {};
+
+  fiParams[SemanticConventions.LLM_INVOCATION_PARAMETERS] =
+    safelyJSONStringify(runExtra.invocation_params) ?? undefined;
+
+  if (isString(runExtra.invocation_params.model_name)) {
+    fiParams[SemanticConventions.LLM_MODEL_NAME] =
+      runExtra.invocation_params.model_name;
+  } else if (isString(runExtra.invocation_params.model)) {
+    fiParams[SemanticConventions.LLM_MODEL_NAME] =
+      runExtra.invocation_params.model;
+  }
+
+  // add tool json schema if present in the invocation params
+  const tools = runExtra.invocation_params.tools;
+  if (Array.isArray(tools) && tools.length > 0) {
+    fiParams[SemanticConventions.LLM_TOOLS] = safelyJSONStringify(tools) ?? undefined;
+  }
+  return fiParams;
+}
+
+function getTemplateFromSerialized(serialized: Run["serialized"]) {
+  if (!isObject(serialized) || !isObject(serialized.kwargs)) {
+    return null;
+  }
+  const messages = serialized.kwargs.messages;
+  if (!isNonEmptyArray(messages)) {
+    return null;
+  }
+  const firstMessage = messages[0];
+  if (!isObject(firstMessage) || !isObject(firstMessage.prompt)) {
+    return null;
+  }
+  const template = firstMessage.prompt.template;
+  if (!isString(template)) {
+    return null;
+  }
+  return template;
+}
+
+const safelyGetTemplateFromSerialized = withSafety({
+  fn: getTemplateFromSerialized,
+});
+
+/**
+ * A best effort function to extract the prompt template from a langchain run.
+ * @param run - The langchain run to extract the prompt template from
+ * @returns The FI attributes for the prompt template
+ */
+function formatPromptTemplate(run: Run): PromptTemplateAttributes | null {
+  if (run.run_type.toLowerCase() !== "prompt") {
+    return null;
+  }
+  return {
+    [SemanticConventions.PROMPT_TEMPLATE_VARIABLES]:
+      safelyJSONStringify(run.inputs) ?? undefined,
+    [SemanticConventions.PROMPT_TEMPLATE_TEMPLATE]:
+      safelyGetTemplateFromSerialized(run.serialized) ?? undefined,
+  };
+}
+
+function getTokenCount(maybeCount: unknown) {
+  return isNumber(maybeCount) ? maybeCount : undefined;
+}
+
+/**
+ * Formats the token counts of a langchain run into FI attributes.
+ * @param outputs - The outputs of a langchain run
+ * @returns The FI attributes for the token counts
+ *
+ * @see https://github.com/langchain-ai/langchainjs/blob/main/langchain-core/src/language_models/chat_models.ts#L403 for how token counts get added to outputs
+ */
+function formatTokenCounts(
+  outputs: Run["outputs"],
+): TokenCountAttributes | null {
+  if (!isObject(outputs)) {
+    return null;
+  }
+  const firstGeneration = getFirstOutputGeneration(outputs);
+
+  /**
+   * Some community models have non standard output structures and show token counts in different places notable ChatBedrock
+   * @see https://github.com/langchain-ai/langchainjs/blob/a173e300ef9ada416220876a2739e024b3a7f268/libs/langchain-community/src/chat_models/bedrock/web.ts
+   */
+  // Generations is an array of arrays containing messages
+  const maybeGenerationComponent =
+    firstGeneration != null ? firstGeneration[0] : null;
+  const maybeMessage = isObject(maybeGenerationComponent)
+    ? maybeGenerationComponent.message
+    : null;
+  const usageMetadata = isObject(maybeMessage)
+    ? maybeMessage.usage_metadata
+    : null;
+  if (isObject(usageMetadata)) {
+    const tokenCountAttributes: TokenCountAttributes = {
+      [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]: getTokenCount(
+        usageMetadata.output_tokens,
+      ),
+      [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]: getTokenCount(
+        usageMetadata.input_tokens,
+      ),
+      [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]: getTokenCount(
+        usageMetadata.total_tokens,
+      ),
+    };
+    // Parse out the prompt / input token details.
+    // Note we fallback to undefined if the token details are not present just to save keys
+    if (isObject(usageMetadata.input_token_details)) {
+      tokenCountAttributes[
+        SemanticConventions.LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ
+      ] =
+        getTokenCount(usageMetadata.input_token_details.cache_read) ||
+        undefined;
+      tokenCountAttributes[
+        SemanticConventions.LLM_TOKEN_COUNT_PROMPT_DETAILS_AUDIO
+      ] = getTokenCount(usageMetadata.input_token_details.audio) || undefined;
+    }
+    // Parse out the completion / output token details
+    if (isObject(usageMetadata.output_token_details)) {
+      tokenCountAttributes[
+        SemanticConventions.LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING
+      ] =
+        getTokenCount(usageMetadata.output_token_details.reasoning) ||
+        undefined;
+      tokenCountAttributes[
+        SemanticConventions.LLM_TOKEN_COUNT_COMPLETION_DETAILS_AUDIO
+      ] = getTokenCount(usageMetadata.output_token_details.audio) || undefined;
+    }
+    return tokenCountAttributes;
+  }
+  const llmOutput = outputs.llmOutput;
+  if (!isObject(llmOutput)) {
+    return null;
+  }
+  if (isObject(llmOutput.tokenUsage)) {
+    return {
+      [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]: getTokenCount(
+        llmOutput.tokenUsage.completionTokens,
+      ),
+      [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]: getTokenCount(
+        llmOutput.tokenUsage.promptTokens,
+      ),
+      [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]: getTokenCount(
+        llmOutput.tokenUsage.totalTokens,
+      ),
+    };
+  }
+  /**
+   * In the case of streamed outputs, the token counts are not available
+   * only estimated counts provided by langchain (not the model provider) are available
+   */
+  if (isObject(llmOutput.estimatedTokenUsage)) {
+    return {
+      [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]: getTokenCount(
+        llmOutput.estimatedTokenUsage.completionTokens,
+      ),
+      [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]: getTokenCount(
+        llmOutput.estimatedTokenUsage.promptTokens,
+      ),
+      [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]: getTokenCount(
+        llmOutput.estimatedTokenUsage.totalTokens,
+      ),
+    };
+  }
+
+  /**
+   * In some cases community models have a different output structure do to the way they extend the base model
+   * Notably ChatBedrock may have tokens stored in this format instead of normalized
+   * @see https://github.com/langchain-ai/langchainjs/blob/a173e300ef9ada416220876a2739e024b3a7f268/libs/langchain-community/src/chat_models/bedrock/web.ts for ChatBedrock
+   * and
+   * @see https://github.com/langchain-ai/langchainjs/blob/main/langchain-core/src/language_models/chat_models.ts#L403 for nomalization
+   */
+  if (isObject(llmOutput.usage)) {
+    const maybePromptTokens = getTokenCount(llmOutput.usage.input_tokens);
+    const maybeCompletionTokens = getTokenCount(llmOutput.usage.output_tokens);
+    let maybeTotalTokens = getTokenCount(llmOutput.usage.total_tokens);
+    if (maybeTotalTokens == null) {
+      maybeTotalTokens =
+        isNumber(maybePromptTokens) && isNumber(maybeCompletionTokens)
+          ? maybePromptTokens + maybeCompletionTokens
+          : undefined;
+    }
+    return {
+      [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]: getTokenCount(
+        maybeCompletionTokens,
+      ),
+      [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]:
+        getTokenCount(maybePromptTokens),
+      [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]: maybeTotalTokens,
+    };
+  }
+  return null;
+}
+
+/**
+ * Formats the function calls of a langchain run into FI attributes.
+ * @param outputs - The outputs of a langchain run
+ * @returns The FI attributes for the function calls
+ */
+function formatFunctionCalls(outputs: Run["outputs"]) {
+  const firstGeneration = getFirstOutputGeneration(outputs);
+  if (firstGeneration == null) {
+    return null;
+  }
+  const maybeGeneration = firstGeneration[0];
+  if (!isObject(maybeGeneration) || !isObject(maybeGeneration.message)) {
+    return null;
+  }
+
+  const additionalKwargs = maybeGeneration.message.additional_kwargs;
+
+  if (
+    !isObject(additionalKwargs) ||
+    !isObject(additionalKwargs.function_call)
+  ) {
+    return null;
+  }
+
+  return {
+    [SemanticConventions.LLM_FUNCTION_CALL]: safelyJSONStringify(
+      additionalKwargs.function_call,
+    ),
+  };
+}
+
+/**
+ * Formats the tool calls of a langchain run into FI attributes.
+ * @param run - The langchain run to extract the tool calls from
+ * @returns The FI attributes for the tool calls
+ */
+function formatToolCalls(run: Run) {
+  const normalizedRunType = run.run_type.toLowerCase();
+  if (normalizedRunType !== "tool") {
+    return null;
+  }
+  const toolAttributes: ToolAttributes = {
+    [SemanticConventions.TOOL_NAME]: run.name,
+  };
+  if (!isObject(run.serialized)) {
+    return toolAttributes;
+  }
+  if (isString(run.serialized.name)) {
+    toolAttributes[SemanticConventions.TOOL_NAME] = run.serialized.name;
+  }
+  if (isString(run.serialized.description)) {
+    toolAttributes[SemanticConventions.TOOL_DESCRIPTION] =
+      run.serialized.description;
+  }
+  return toolAttributes;
+}
+
+/**
+ * Formats the metadata of a langchain run into FI attributes.
+ * @param run - The langchain run to extract the metadata from
+ * @returns The FI attributes for the metadata
+ */
+function formatMetadata(run: Run) {
+  if (!isObject(run.extra) || !isObject(run.extra.metadata)) {
+    return null;
+  }
+  return {
+    [SemanticConventions.METADATA]: safelyJSONStringify(run.extra.metadata),
+  };
+}
+
+/**
+ * Formats the session id of a langchain run into FI attributes.
+ *
+ * @see https://docs.smith.langchain.com/observability/how_to_guides/monitoring/threads#group-traces-into-threads
+ *
+ * @param run - The langchain run to extract the session id from
+ * @returns The FI attributes for the session id
+ */
+function formatSessionId(run: Run) {
+  if (!isObject(run.extra)) {
+    return null;
+  }
+  const metadata = run.extra.metadata;
+  if (!isObject(metadata)) {
+    return null;
+  }
+  const sessionId = SESSION_ID_KEYS.find((key) => isString(metadata[key]));
+  if (sessionId == null) {
+    return null;
+  }
+  return {
+    [SemanticConventions.SESSION_ID]: metadata[sessionId],
+  };
+}
+
+export const safelyFlattenAttributes = withSafety({
+  fn: flattenAttributes,
+  onError: onError("Error flattening attributes"),
+});
+export const safelyFormatIO = withSafety({
+  fn: formatIO,
+  onError: onError("Error formatting IO"),
+});
+export const safelyFormatInputMessages = withSafety({
+  fn: formatInputMessages,
+  onError: onError("Error formatting input messages"),
+});
+export const safelyFormatOutputMessages = withSafety({
+  fn: formatOutputMessages,
+  onError: onError("Error formatting output messages"),
+});
+export const safelyGetFISpanKindFromRunType = withSafety({
+  fn: getFISpanKindFromRunType,
+  onError: onError("Error getting FI span kind from run type"),
+});
+export const safelyFormatRetrievalDocuments = withSafety({
+  fn: formatRetrievalDocuments,
+  onError: onError("Error formatting retrieval documents"),
+});
+export const safelyFormatLLMParams = withSafety({
+  fn: formatLLMParams,
+  onError: onError("Error formatting LLM params"),
+});
+export const safelyFormatPromptTemplate = withSafety({
+  fn: formatPromptTemplate,
+  onError: onError("Error formatting prompt template"),
+});
+export const safelyFormatTokenCounts = withSafety({
+  fn: formatTokenCounts,
+  onError: onError("Error formatting token counts"),
+});
+export const safelyFormatFunctionCalls = withSafety({
+  fn: formatFunctionCalls,
+  onError: onError("Error formatting function calls"),
+});
+export const safelyFormatToolCalls = withSafety({
+  fn: formatToolCalls,
+  onError: onError("Error formatting tool calls"),
+});
+export const safelyFormatMetadata = withSafety({
+  fn: formatMetadata,
+  onError: onError("Error formatting metadata"),
+});
+export const safelyFormatSessionId = withSafety({
+  fn: formatSessionId,
+  onError: onError("Error formatting session id"),
+});
