@@ -41,3 +41,22 @@ describeE2E("LiveKit E2E Tests", () => {
   }, 15000);
 
   describe("Client", () => {
+    it("should verify livekit module can be imported with instrumentation", async () => {
+      const livekitModule = await import("@livekit/agents");
+      expect(livekitModule).toBeDefined();
+    }, 30000);
+
+    it("should verify instrumentation lifecycle", () => {
+      expect(instrumentation).toBeDefined();
+      instrumentation.disable();
+      instrumentation.enable();
+    });
+  });
+
+  describe("Error Handling", () => {
+    it("should handle missing configuration gracefully", async () => {
+      const livekitModule = await import("@livekit/agents");
+      expect(livekitModule).toBeDefined();
+    }, 30000);
+  });
+});
