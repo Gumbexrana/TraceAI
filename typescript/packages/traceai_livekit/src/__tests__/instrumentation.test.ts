@@ -244,3 +244,109 @@ describe("LiveKit Client Patching", () => {
     inst.manuallyInstrument(mockModule);
 
     // Should not have changed
+    expect(mockModule.Room.prototype.connect).toBe(original);
+  });
+});
+
+describe("LiveKit RTC Node Patching", () => {
+  const memoryExporter = new InMemorySpanExporter();
+  const tracerProvider = new NodeTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(memoryExporter)]
+  });
+  tracerProvider.register();
+
+  beforeEach(() => {
+    memoryExporter.reset();
+    _resetPatchedStateForTesting();
+  });
+
+  it("should wrap AudioSource.captureFrame when available", () => {
+    const inst = new LiveKitInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const originalCapture = jest.fn();
+
+    const mockModule = {
+      AudioSource: {
+        prototype: {
+          captureFrame: originalCapture,
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+
+  it("should wrap VideoSource.captureFrame when available", () => {
+    const inst = new LiveKitInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const originalCapture = jest.fn();
+
+    const mockModule = {
+      VideoSource: {
+        prototype: {
+          captureFrame: originalCapture,
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+});
+
+describe("Room Lifecycle Tracking", () => {
+  const memoryExporter = new InMemorySpanExporter();
+  const tracerProvider = new NodeTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(memoryExporter)]
+  });
+  tracerProvider.register();
+
+  beforeEach(() => {
+    memoryExporter.reset();
+    _resetPatchedStateForTesting();
+  });
+
+  it("should handle room connect and disconnect lifecycle", () => {
+    const inst = new LiveKitInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const mockModule = {
+      Room: {
+        prototype: {
+          connect: jest.fn().mockResolvedValue(undefined),
+          disconnect: jest.fn().mockResolvedValue(undefined),
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+
+  it("should handle track publish and unpublish", () => {
+    const inst = new LiveKitInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const mockModule = {
+      Room: {
+        prototype: {},
+      },
+      LocalParticipant: {
+        prototype: {
+          publishTrack: jest.fn().mockResolvedValue({ sid: "track-1" }),
+          unpublishTrack: jest.fn().mockResolvedValue(undefined),
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+});
