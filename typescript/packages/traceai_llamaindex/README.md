@@ -95,3 +95,45 @@ OPENAI_API_KEY=your_openai_api_key
   - Query engine execution
   - Retrieval operations
   - Embedding generation
+  - LLM chat completions
+- Support for both ESM and CommonJS modules
+- Compatible with LlamaIndex.js
+- Integration with TraceAI's observability platform
+
+## Instrumented Operations
+
+This instrumentation automatically traces:
+
+- **Vector Store Operations**: Document indexing, vector storage
+- **Query Engine**: Query execution and response generation
+- **Retrieval**: Document retrieval and similarity search
+- **Embeddings**: Text embedding generation
+- **LLM Operations**: Chat completions and text generation
+
+
+## Peer Dependencies
+
+This package requires the following peer dependencies:
+- `llamaindex`: >=0.1.0
+
+## Development
+
+```bash
+# Install dependencies
+pnpm install
+
+# Build the package
+pnpm build
+
+# Run tests
+pnpm test
+
+# Type checking
+pnpm lint
+```
+
+## Support
+
+For support, please open an issue in our [GitHub repository](https://github.com/future-agi/traceAI/issues).
+
+Check your TraceAI dashboard at https://app.futureagi.com/dashboard/observe for traces!
