@@ -9,3 +9,9 @@
   "include": [
     "src/**/*.ts"
   ],
+  "references": [],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/__tests__/**"
+  ]
+}
