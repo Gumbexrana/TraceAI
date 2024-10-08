@@ -141,3 +141,65 @@ export class LlamaIndexInstrumentation extends InstrumentationBase {
             cls.name,
             "retrieve",
             FISpanKind.RETRIEVER,
+            () => this.tracer,
+          ),
+        );
+      }
+    }
+
+    return moduleExports;
+  }
+
+  private unpatch(moduleExports: typeof llamaindex, moduleVersion?: string) {
+    this._diag.debug(`Unpatching llamaindex@${moduleVersion}`);
+
+    this._unwrap(moduleExports.RetrieverQueryEngine.prototype, "query");
+
+    for (const key in moduleExports) {
+      const cls = (moduleExports as any)[key];
+      if (isLLM(cls.prototype)) {
+        this._unwrap(cls.prototype, "complete");
+        this._unwrap(cls.prototype, "chat");
+      } else if (isEmbedding(cls.prototype)) {
+        this._unwrap(cls.prototype, "getQueryEmbedding");
+      } else if (isSynthesizer(cls.prototype)) {
+        this._unwrap(cls.prototype, "synthesize");
+      } else if (isRetriever(cls.prototype)) {
+        this._unwrap(cls.prototype, "retrieve");
+      }
+    }
+
+    return moduleExports;
+  }
+
+  private patchOpenAI(moduleExports: any, moduleVersion?: string) {
+    this._diag.debug(`Patching @llamaindex/openai@${moduleVersion}`);
+
+    // Instrument OpenAIAgent if it exists
+    if (moduleExports.OpenAIAgent && moduleExports.OpenAIAgent.prototype) {
+      this._wrap(
+        moduleExports.OpenAIAgent.prototype,
+        "chat",
+        genericWrapper(
+          moduleExports.OpenAIAgent.name,
+          "agent",
+          FISpanKind.AGENT,
+          () => this.tracer,
+        ),
+      );
+    }
+
+    return moduleExports;
+  }
+
+  private unpatchOpenAI(moduleExports: any, moduleVersion?: string) {
+    this._diag.debug(`Unpatching @llamaindex/openai@${moduleVersion}`);
+
+    // Unwrap OpenAIAgent if it exists
+    if (moduleExports.OpenAIAgent && moduleExports.OpenAIAgent.prototype) {
+      this._unwrap(moduleExports.OpenAIAgent.prototype, "chat");
+    }
+
+    return moduleExports;
+  }
+}
