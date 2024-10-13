@@ -60,3 +60,31 @@ export async function* llmGeneratorWrapper(
       message += (messageChunk as llamaindex.ChatResponseChunk).delta;
     }
     if ((messageChunk as llamaindex.CompletionResponse).text) {
+      message += (messageChunk as llamaindex.CompletionResponse).text;
+    }
+    yield messageChunk;
+  }
+  fn(message);
+}
+
+export function isLLM(llm: any): llm is LLM {
+  return (
+    llm &&
+    (llm as LLM).complete !== undefined &&
+    (llm as LLM).chat !== undefined
+  );
+}
+
+export function isEmbedding(embedding: any): embedding is BaseEmbedding {
+  return !!(embedding as BaseEmbedding)?.getQueryEmbedding;
+}
+
+export function isSynthesizer(synthesizer: any): synthesizer is BaseSynthesizer {
+  return (
+    synthesizer && (synthesizer as BaseSynthesizer).synthesize !== undefined
+  );
+}
+
+export function isRetriever(retriever: any): retriever is BaseRetriever {
+  return retriever && (retriever as BaseRetriever).retrieve !== undefined;
+}
