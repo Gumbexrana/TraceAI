@@ -1,0 +1,29 @@
+{
+  "name": "@traceai/mastra",
+  "version": "0.2.0",
+  "description": "OpenTelemetry utilities for Mastra",
+  "main": "./dist/src/index.js",
+  "module": "./dist/esm/index.js",
+  "esnext": "./dist/esnext/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/src/index.js"
+    },
+    "./legacy": {
+      "types": "./dist/src/legacy.d.ts",
+      "import": "./dist/esm/legacy.js",
+      "require": "./dist/src/legacy.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "rimraf dist",
+    "build": "tsc --build tsconfig.json tsconfig.esm.json tsconfig.esnext.json && tsc-alias -p tsconfig.esm.json && pnpm run postbuild",
+    "postbuild": "echo '{\"type\": \"module\"}' > ./dist/esm/package.json",
+    "test": "jest --passWithNoTests",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint . --ext .ts",
+    "prepare": "pnpm run build"
