@@ -61,3 +61,98 @@ export function resolveResourceAttributes(
   };
 }
 
+/** @internal Exported for unit testing; not part of the public package API. */
+export function resolveEndpoint(options: FIMastraExporterOptions): string {
+  if (options.endpoint) return options.endpoint;
+  const base = options.baseUrl ?? process.env.FI_BASE_URL ?? DEFAULT_FI_BASE_URL;
+  return base.replace(/\/+$/, "") + FI_TRACES_PATH;
+}
+
+/** @internal Exported for unit testing; not part of the public package API. */
+export function resolveAuth(options: FIMastraExporterOptions): {
+  apiKey: string;
+  secretKey: string;
+} {
+  const apiKey = options.apiKey ?? process.env.FI_API_KEY;
+  const secretKey = options.secretKey ?? process.env.FI_SECRET_KEY;
+  if (!apiKey || !secretKey) {
+    throw new Error(
+      "[@traceai/mastra] Missing Future AGI credentials. Set FI_API_KEY and " +
+        "FI_SECRET_KEY environment variables, or pass { apiKey, secretKey } to " +
+        "createFIMastraExporter()/createFIObservability().",
+    );
+  }
+  return { apiKey, secretKey };
+}
+
+/**
+ * Create a Mastra v1 observability exporter pre-configured for Future AGI.
+ *
+ */
+export function createFIMastraExporter(
+  options: FIMastraExporterOptions = {},
+): FIMastraSpanExporter {
+  const { apiKey, secretKey } = resolveAuth(options);
+  const config: FISpanExporterConfig = {
+    endpoint: resolveEndpoint(options),
+    headers: {
+      "x-api-key": apiKey,
+      "x-secret-key": secretKey,
+      ...(options.headers ?? {}),
+    },
+    serviceName: options.serviceName ?? "mastra-app",
+    resourceAttributes: resolveResourceAttributes(options),
+    ...(options.timeout !== undefined ? { timeout: options.timeout } : {}),
+    ...(options.batchSize !== undefined ? { batchSize: options.batchSize } : {}),
+  };
+  return new FIMastraSpanExporter(config);
+}
+
+export interface FIObservabilityOptions extends FIMastraExporterOptions {
+  /**
+   * Mastra span types to drop before export. Defaults to `[SpanType.MODEL_CHUNK]`
+   * — per-chunk streaming spans that are pure noise in an observability backend.
+   * Pass `[]` to export everything.
+   */
+  excludeSpanTypes?: SpanType[];
+}
+
+/**
+ * Create a ready-to-use Mastra v1 {@link Observability} instance wired to Future AGI.
+ *
+ * @example
+ * ```ts
+ * import { Mastra } from "@mastra/core";
+ * import { createFIObservability } from "@traceai/mastra";
+ *
+ * export const mastra = new Mastra({
+ *   agents: { ... },
+ *   observability: createFIObservability({ serviceName: "my-app" }),
+ * });
+ * ```
+ */
+export function createFIObservability(
+  options: FIObservabilityOptions = {},
+): Observability {
+  const {
+    serviceName = "mastra-app",
+    excludeSpanTypes = [SpanType.MODEL_CHUNK],
+    ...exporterOptions
+  } = options;
+  return new Observability({
+    configs: {
+      otel: {
+        serviceName,
+        excludeSpanTypes,
+        exporters: [
+          createFIMastraExporter({
+            ...exporterOptions,
+            serviceName,
+            // Default the FI project to the service name so a project is created.
+            projectName: exporterOptions.projectName ?? serviceName,
+          }),
+        ],
+      },
+    },
+  });
+}
