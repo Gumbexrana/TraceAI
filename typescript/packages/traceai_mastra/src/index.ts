@@ -5,3 +5,15 @@
 export {
   createFIObservability,
   createFIMastraExporter,
+} from "./FIObservability.js";
+export type {
+  FIObservabilityOptions,
+  FIMastraExporterOptions,
+} from "./FIObservability.js";
+export {
+  FIMastraSpanExporter,
+  type FISpanExporterConfig,
+} from "./FIMastraSpanExporter.js";
+
+// The legacy Mastra v0.x exporter (`telemetry:` config) lives at
+// `@traceai/mastra/legacy` so v1 users don't pull in @traceai/vercel et al.
