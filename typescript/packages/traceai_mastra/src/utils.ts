@@ -12,3 +12,24 @@ import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
  *
  * @param span - The span to augment.
  */
+export const addFIProjectResourceAttributeSpan = (
+  span: ReadableSpan,
+) => {
+  const attributes = span.resource.attributes;
+  if (ATTR_SERVICE_NAME in attributes) {
+    attributes[ATTR_PROJECT_NAME] = attributes[ATTR_SERVICE_NAME];
+  }
+};
+
+/**
+ * Determines whether a span is an OpenInference span.
+ *
+ * @param span - The span to check.
+ * @returns `true` if the span is an OpenInference span, `false` otherwise.
+ */
+export const isFISpan = (span: ReadableSpan) => {
+  const maybeFISpanKind =
+    span.attributes[SemanticConventions.FI_SPAN_KIND];
+  return typeof maybeFISpanKind === "string";
+};
+
