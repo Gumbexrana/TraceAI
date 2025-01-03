@@ -643,4 +643,4 @@ If traceAI helps you debug faster, a ⭐ helps more teams find us.
 [🌐 futureagi.com](https://futureagi.com) · [📖 docs.futureagi.com](https://docs.futureagi.com) · [☁️ app.futureagi.com](https://app.futureagi.com)
 
 </div>
-<!-- maintenance 2024 -->
+<!-- maintenance 2025 -->
