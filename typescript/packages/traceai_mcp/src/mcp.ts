@@ -285,3 +285,126 @@ export class MCPInstrumentation extends InstrumentationBase<InstrumentationConfi
     module: typeof ServerStreamableHTTPModule,
   ) {
     return this._unpatchTransport(
+      module,
+      SERVER_STREAMABLE_HTTP_MODULE_NAME,
+      module.StreamableHTTPServerTransport,
+    );
+  }
+
+  private _patchTransport<M, U extends Transport>(
+    module: M & { fiPatched?: boolean },
+    moduleName: keyof typeof patchedModules,
+    moduleVersion: string | undefined,
+    transportClass: { prototype: U },
+  ) {
+    diag.debug(`Applying patch for ${moduleName}@${moduleVersion}`);
+    if (module?.fiPatched || patchedModules[moduleName]) {
+      return module;
+    }
+
+    this._wrap(transportClass.prototype, "send", this._getTransportSendPatch());
+
+    this._wrap(
+      transportClass.prototype,
+      "start",
+      this._getTransportStartPatch(),
+    );
+
+    patchedModules[moduleName] = true;
+    try {
+      // This can fail if the module is made immutable via the runtime or bundler
+      module.fiPatched = true;
+    } catch (e) {
+      diag.debug(`Failed to set ${moduleName} patched flag on the module`, e);
+    }
+
+    return module;
+  }
+
+  private _unpatchTransport<M, U extends Transport>(
+    module: M & { fiPatched?: boolean },
+    moduleName: keyof typeof patchedModules,
+    transportClass: { prototype: U },
+  ) {
+    this._unwrap(transportClass.prototype, "send");
+    this._unwrap(transportClass.prototype, "start");
+
+    patchedModules[moduleName] = false;
+    try {
+      // This can fail if the module is made immutable via the runtime or bundler
+      module.fiPatched = false;
+    } catch (e) {
+      diag.warn(`Failed to unset ${moduleName} patched flag on the module`, e);
+    }
+
+    return module;
+  }
+
+  private _getTransportSendPatch() {
+    return (original: Transport["send"]) => {
+      return function send(
+        this: Transport,
+        ...args: Parameters<Transport["send"]>
+      ) {
+        const message = args[0];
+        if (!MCPInstrumentation._isJSONRPCRequest(message)) {
+          return original.apply(this, args);
+        }
+        if (!message.params) {
+          message.params = {};
+        }
+        if (!message.params._meta) {
+          message.params._meta = {};
+        }
+        propagation.inject(context.active(), message.params._meta);
+        return original.apply(this, args);
+      };
+    };
+  }
+
+  private _getTransportStartPatch() {
+    return (original: Transport["start"]) => {
+      return function start(
+        this: Transport,
+        ...args: Parameters<Transport["start"]>
+      ) {
+        const onmessage = this.onmessage;
+        if (!onmessage) {
+          return original.apply(this, args);
+        }
+
+        this.onmessage = (...args) => {
+          const message = args[0] as JSONRPCRequest;
+          if (!MCPInstrumentation._isJSONRPCRequest(message)) {
+            return onmessage.apply(this, args);
+          }
+
+          const ctx = propagation.extract(
+            context.active(),
+            message.params?._meta,
+          );
+          return context.with(ctx, () => {
+            return onmessage.apply(this, args);
+          });
+        };
+
+        return original.apply(this, args);
+      };
+    };
+  }
+
+  // A request has a method and request id. We check both primarily to differentiate from
+  // a notification which only has method. If in the future we find we should propagate context
+  // on notifications too, we can loosen the check.
+  private static _isJSONRPCRequest(
+    message: JSONRPCMessage,
+  ): message is JSONRPCRequest {
+    return (
+      typeof message === "object" &&
+      !!message &&
+      "method" in message &&
+      typeof message.method === "string" &&
+      "id" in message
+    );
+  }
+}
