@@ -245,3 +245,110 @@ async function ingestEmbeddings(
 ### 5. Recommendation with User History
 
 ```typescript
+async function getPersonalizedRecommendations(
+  userId: string,
+  recentItemVectors: number[][],
+  limit = 20
+) {
+  // Average recent item vectors for user preference
+  const userPreference = recentItemVectors[0].map((_, i) =>
+    recentItemVectors.reduce((sum, vec) => sum + vec[i], 0) /
+    recentItemVectors.length
+  );
+
+  // Get user's already viewed items
+  const viewedItems = await client.query({
+    collection_name: "user_views",
+    filter: `user_id == "${userId}"`,
+    output_fields: ["item_id"],
+  });
+
+  const excludeIds = viewedItems.data.map((v) => v.item_id);
+
+  // Search for recommendations excluding viewed items
+  const results = await client.search({
+    collection_name: "items",
+    vector: userPreference,
+    limit: limit + excludeIds.length,
+    output_fields: ["name", "category", "thumbnail"],
+    filter:
+      excludeIds.length > 0
+        ? `id not in [${excludeIds.join(",")}]`
+        : undefined,
+  });
+
+  return results.results.slice(0, limit);
+}
+```
+
+### 6. Hybrid Search with Scalar Filtering
+
+```typescript
+async function hybridProductSearch(
+  queryVector: number[],
+  filters: {
+    minPrice?: number;
+    maxPrice?: number;
+    categories?: string[];
+    inStock?: boolean;
+  }
+) {
+  // Build filter expression
+  const filterParts: string[] = [];
+
+  if (filters.minPrice !== undefined) {
+    filterParts.push(`price >= ${filters.minPrice}`);
+  }
+  if (filters.maxPrice !== undefined) {
+    filterParts.push(`price <= ${filters.maxPrice}`);
+  }
+  if (filters.categories?.length) {
+    filterParts.push(
+      `category in [${filters.categories.map((c) => `"${c}"`).join(",")}]`
+    );
+  }
+  if (filters.inStock !== undefined) {
+    filterParts.push(`in_stock == ${filters.inStock}`);
+  }
+
+  const results = await client.search({
+    collection_name: "products",
+    vector: queryVector,
+    limit: 100,
+    filter: filterParts.length > 0 ? filterParts.join(" && ") : undefined,
+    output_fields: ["name", "price", "category", "in_stock", "rating"],
+  });
+
+  return results.results;
+}
+```
+
+## Integration with OpenTelemetry
+
+```typescript
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { MilvusInstrumentation } from "@traceai/milvus";
+
+const sdk = new NodeSDK({
+  traceExporter: new OTLPTraceExporter({
+    url: "http://localhost:4318/v1/traces",
+  }),
+  instrumentations: [new MilvusInstrumentation()],
+});
+
+sdk.start();
+```
+
+## Performance Considerations
+
+- **Batch Operations**: Use `insert` and `upsert` with batches for better throughput
+- **Index Selection**: Choose appropriate index type based on your use case:
+  - `IVF_FLAT`: Good balance of speed and accuracy
+  - `HNSW`: Best for high-recall requirements
+  - `IVF_PQ`: Best for memory-constrained environments
+- **Partition Keys**: Use partitions for multi-tenant scenarios
+
+## License
+
+Apache-2.0
