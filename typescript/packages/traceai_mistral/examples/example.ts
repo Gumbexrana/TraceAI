@@ -78,3 +78,123 @@ async function main() {
 
     // === Test Case 2: Chat with System Prompt ===
     console.log("--- Test Case 2: Chat with System Prompt ---");
+    const systemPromptResponse = await client.chat.complete({
+      model: "mistral-small-latest",
+      messages: [
+        { role: "system", content: "You are a helpful assistant that speaks like a pirate." },
+        { role: "user", content: "Tell me about the ocean." }
+      ],
+    });
+    console.log("Response:", systemPromptResponse.choices?.[0]?.message?.content);
+    console.log();
+
+    // === Test Case 3: Multi-turn Conversation ===
+    console.log("--- Test Case 3: Multi-turn Conversation ---");
+    const conversationResponse = await client.chat.complete({
+      model: "mistral-small-latest",
+      messages: [
+        { role: "user", content: "My favorite color is blue." },
+        { role: "assistant", content: "That's a beautiful choice! Blue is often associated with calmness and tranquility." },
+        { role: "user", content: "What's my favorite color?" }
+      ],
+    });
+    console.log("Response:", conversationResponse.choices?.[0]?.message?.content);
+    console.log();
+
+    // === Test Case 4: Streaming Chat Completion ===
+    console.log("--- Test Case 4: Streaming Chat Completion ---");
+    const stream = await client.chat.stream({
+      model: "mistral-small-latest",
+      messages: [
+        { role: "user", content: "Write a short poem about coding." }
+      ],
+    });
+
+    process.stdout.write("Streaming response: ");
+    for await (const chunk of stream) {
+      const content = chunk.data?.choices?.[0]?.delta?.content || "";
+      process.stdout.write(content);
+    }
+    console.log("\n");
+
+    // === Test Case 5: JSON Mode ===
+    console.log("--- Test Case 5: JSON Mode ---");
+    const jsonResponse = await client.chat.complete({
+      model: "mistral-small-latest",
+      messages: [
+        { role: "user", content: "List 3 famous scientists with their field of study. Return as JSON array with 'name' and 'field' keys." }
+      ],
+      responseFormat: { type: "json_object" },
+    });
+    console.log("JSON Response:", jsonResponse.choices?.[0]?.message?.content);
+    console.log();
+
+    // === Test Case 6: Function/Tool Calling ===
+    console.log("--- Test Case 6: Function/Tool Calling ---");
+    const toolResponse = await client.chat.complete({
+      model: "mistral-small-latest",
+      messages: [
+        { role: "user", content: "What's the weather like in Paris?" }
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "Get the current weather in a given location",
+            parameters: {
+              type: "object",
+              properties: {
+                location: {
+                  type: "string",
+                  description: "The city name, e.g. Paris, London"
+                },
+                unit: {
+                  type: "string",
+                  enum: ["celsius", "fahrenheit"],
+                  description: "The unit of temperature"
+                }
+              },
+              required: ["location"]
+            }
+          }
+        }
+      ],
+      toolChoice: "auto",
+    });
+
+    if (toolResponse.choices?.[0]?.message?.toolCalls) {
+      console.log("Tool calls:", JSON.stringify(toolResponse.choices[0].message.toolCalls, null, 2));
+    } else {
+      console.log("Response:", toolResponse.choices?.[0]?.message?.content);
+    }
+    console.log();
+
+    // === Test Case 7: Embeddings ===
+    console.log("--- Test Case 7: Embeddings ---");
+    const embeddingsResponse = await client.embeddings.create({
+      model: "mistral-embed",
+      inputs: ["Hello, world!", "How are you?", "Mistral AI is awesome!"],
+    });
+    console.log("Embeddings count:", embeddingsResponse.data?.length);
+    console.log("First embedding dimensions:", embeddingsResponse.data?.[0]?.embedding?.length);
+    console.log("First embedding (first 5 values):", embeddingsResponse.data?.[0]?.embedding?.slice(0, 5));
+    console.log();
+
+    console.log("--- All Test Cases Completed Successfully ---\n");
+
+  } catch (error) {
+    console.error("Error during Mistral API calls:", error);
+  } finally {
+    // 4. Shutdown the provider to ensure all spans are flushed
+    console.log("Shutting down tracer provider...");
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await tracerProvider.shutdown();
+    console.log("Tracer provider shut down successfully.");
+  }
+}
+
+main().catch((error) => {
+  console.error("Unhandled error:", error);
+  process.exit(1);
+});
