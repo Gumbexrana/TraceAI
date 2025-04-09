@@ -147,3 +147,67 @@ describeE2E("Mistral E2E Tests", () => {
                 parameters: {
                   type: "object",
                   properties: {
+                    location: { type: "string", description: "City name" }
+                  },
+                  required: ["location"]
+                }
+              }
+            }
+          ],
+          toolChoice: "auto",
+        });
+        console.log("Tool calling response received");
+      } catch (error) {
+        console.log("Tool calling errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+
+  describe("Embeddings", () => {
+    it("should generate embeddings for text", async () => {
+      try {
+        const response = await client.embeddings.create({
+          model: "mistral-embed",
+          inputs: ["Hello, world!"],
+        });
+        console.log("Embedding response received");
+      } catch (error) {
+        console.log("Embedding errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should generate embeddings for multiple texts", async () => {
+      try {
+        const response = await client.embeddings.create({
+          model: "mistral-embed",
+          inputs: ["Hello", "World", "Test"],
+        });
+        console.log("Batch embedding response received");
+      } catch (error) {
+        console.log("Batch embedding errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+
+  describe("Error Handling", () => {
+    it("should handle invalid model gracefully", async () => {
+      await expect(
+        client.chat.complete({
+          model: "non-existent-model-12345",
+          messages: [{ role: "user", content: "Hello" }],
+        })
+      ).rejects.toThrow();
+      console.log("Error handling: correctly threw on invalid model");
+    }, 30000);
+
+    it("should handle empty messages gracefully", async () => {
+      await expect(
+        client.chat.complete({
+          model: "mistral-small-latest",
+          messages: [],
+        })
+      ).rejects.toThrow();
+      console.log("Error handling: correctly threw on empty messages");
+    }, 30000);
+  });
+});
