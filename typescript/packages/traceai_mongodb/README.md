@@ -343,3 +343,152 @@ async function getRecommendations(
         },
       },
       {
+        $project: {
+          name: 1,
+          price: 1,
+          imageUrl: 1,
+          category: 1,
+          score: { $meta: "vectorSearchScore" },
+        },
+      },
+      { $limit: limit },
+    ])
+    .toArray();
+
+  return recommendations;
+}
+```
+
+### 5. Document Clustering and Deduplication
+
+```typescript
+async function findDuplicates(documentId: string, threshold = 0.95) {
+  const collection = client.db("docs").collection("documents");
+
+  const document = await collection.findOne({ _id: documentId });
+  if (!document?.embedding) return [];
+
+  // Find near-duplicates (traced)
+  const similar = await collection
+    .aggregate([
+      {
+        $vectorSearch: {
+          index: "doc_embeddings",
+          path: "embedding",
+          queryVector: document.embedding,
+          numCandidates: 50,
+          limit: 20,
+        },
+      },
+      {
+        $match: {
+          _id: { $ne: documentId },
+        },
+      },
+      {
+        $addFields: {
+          similarity: { $meta: "vectorSearchScore" },
+        },
+      },
+      {
+        $match: {
+          similarity: { $gte: threshold },
+        },
+      },
+    ])
+    .toArray();
+
+  return similar;
+}
+```
+
+### 6. Multi-tenant Vector Search
+
+```typescript
+async function tenantSearch(
+  tenantId: string,
+  queryVector: number[],
+  filters?: { category?: string }
+) {
+  const collection = client.db("saas").collection("tenant_data");
+
+  // Pre-filter by tenant for security and performance
+  const searchFilter: any = { tenantId: { $eq: tenantId } };
+
+  if (filters?.category) {
+    searchFilter.category = { $eq: filters.category };
+  }
+
+  const results = await collection
+    .aggregate([
+      {
+        $vectorSearch: {
+          index: "tenant_vectors",
+          path: "embedding",
+          queryVector,
+          numCandidates: 100,
+          limit: 20,
+          filter: searchFilter,
+        },
+      },
+      {
+        $project: {
+          embedding: 0, // Don't return embeddings
+          tenantId: 0, // Don't expose tenant info
+        },
+      },
+    ])
+    .toArray();
+
+  return results;
+}
+```
+
+## Setting Up Vector Search Index
+
+```javascript
+// Create vector search index in MongoDB Atlas
+db.collection.createSearchIndex({
+  name: "vector_index",
+  type: "vectorSearch",
+  definition: {
+    fields: [
+      {
+        type: "vector",
+        path: "embedding",
+        numDimensions: 1536,
+        similarity: "cosine",
+      },
+      {
+        type: "filter",
+        path: "category",
+      },
+      {
+        type: "filter",
+        path: "tenantId",
+      },
+    ],
+  },
+});
+```
+
+## Integration with OpenTelemetry
+
+```typescript
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { MongoDBInstrumentation } from "@traceai/mongodb";
+
+const sdk = new NodeSDK({
+  traceExporter: new OTLPTraceExporter({
+    url: "http://localhost:4318/v1/traces",
+  }),
+  instrumentations: [new MongoDBInstrumentation()],
+});
+
+sdk.start();
+```
+
+## License
+
+Apache-2.0
