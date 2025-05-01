@@ -66,3 +66,107 @@ describe("MongoDB Instrumentation", () => {
     jest.clearAllMocks();
     jest.resetModules();
     const mod = require("../instrumentation");
+    MongoDBInstrumentation = mod.MongoDBInstrumentation;
+    isPatched = mod.isPatched;
+    instrumentation = new MongoDBInstrumentation({
+      instrumentationConfig: { enabled: true },
+    });
+    instrumentation.enable();
+  });
+
+  afterEach(() => {
+    instrumentation?.disable();
+  });
+
+  describe("Initialization", () => {
+    it("should create instrumentation instance", () => {
+      expect(instrumentation).toBeInstanceOf(MongoDBInstrumentation);
+    });
+
+    it("should initialize with default config", () => {
+      const inst = new MongoDBInstrumentation();
+      expect(inst).toBeInstanceOf(MongoDBInstrumentation);
+    });
+
+    it("should have correct instrumentation name", () => {
+      expect(instrumentation.instrumentationName).toBe("@traceai/mongodb");
+    });
+  });
+
+  describe("Patching", () => {
+    it("should report not patched initially", () => {
+      expect(isPatched()).toBe(false);
+    });
+
+    it("should patch Collection methods", () => {
+      const mockModule = {
+        Collection: {
+          prototype: {
+            aggregate: jest.fn(),
+            find: jest.fn(),
+            insertOne: jest.fn(),
+          },
+        },
+      };
+      instrumentation.manuallyInstrument(mockModule);
+      expect(isPatched()).toBe(true);
+    });
+  });
+
+  describe("Aggregate Operation", () => {
+    it("should create span for aggregate operation", async () => {
+      const mockCollection = {
+        collectionName: "test_collection",
+        aggregate: (jest.fn() as MockFn).mockResolvedValue({ insertedCount: 1 }),
+      };
+      const mockModule = {
+        Collection: { prototype: { aggregate: mockCollection.aggregate } },
+      };
+      instrumentation.manuallyInstrument(mockModule);
+
+      await mockModule.Collection.prototype.aggregate.call(mockCollection, []);
+
+      expect(mockSpan.setStatus).toHaveBeenCalledWith({ code: 1 });
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("Vector Search Detection", () => {
+    it("should detect $vectorSearch in aggregation pipeline", async () => {
+      const mockCollection = {
+        collectionName: "test_collection",
+        aggregate: (jest.fn() as MockFn).mockResolvedValue({ docs: [] }),
+      };
+      const mockModule = {
+        Collection: { prototype: { aggregate: mockCollection.aggregate } },
+      };
+      instrumentation.manuallyInstrument(mockModule);
+
+      await mockModule.Collection.prototype.aggregate.call(mockCollection, [
+        { $vectorSearch: { queryVector: [0.1, 0.2], limit: 10 } },
+      ]);
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("Error Handling", () => {
+    it("should record exception on error", async () => {
+      const error = new Error("Aggregate failed");
+      const mockCollection = {
+        aggregate: (jest.fn() as MockFn).mockRejectedValue(error),
+      };
+      const mockModule = {
+        Collection: { prototype: { aggregate: mockCollection.aggregate } },
+      };
+      instrumentation.manuallyInstrument(mockModule);
+
+      await expect(
+        mockModule.Collection.prototype.aggregate.call(mockCollection, [])
+      ).rejects.toThrow("Aggregate failed");
+
+      expect(mockSpan.recordException).toHaveBeenCalledWith(error);
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+});
