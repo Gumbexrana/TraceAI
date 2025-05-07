@@ -1,0 +1,25 @@
+{
+  "name": "@traceai/ollama",
+  "version": "0.1.0",
+  "description": "TraceAI instrumentation for Ollama local LLM",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/cjs/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/cjs/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run build:cjs && npm run build:esm",
+    "build:cjs": "tsc -p tsconfig.json",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "test": "jest --config jest.config.js",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist"
+  },
