@@ -1,0 +1,8 @@
+{
+  "name": "@traceai/ollama-examples",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "example": "npx ts-node example.ts"
+  },
+  "dependencies": {
