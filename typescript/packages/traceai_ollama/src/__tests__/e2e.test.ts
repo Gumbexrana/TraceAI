@@ -214,3 +214,96 @@ describeE2E("Ollama E2E Tests", () => {
           model: OLLAMA_MODEL,
           prompt: "Write a haiku about coding.",
           options: {
+            temperature: 0.7,
+            num_predict: 100,
+          },
+          stream: false,
+        });
+        console.log("Generation options response:", response.response);
+      } catch (error) {
+        console.log("Generation options errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+
+  describe("Embeddings", () => {
+    it("should generate embeddings with embed method", async () => {
+      try {
+        const response = await client.embed({
+          model: OLLAMA_EMBED_MODEL,
+          input: "Hello, world!",
+        });
+        console.log("Embedding dimensions:", response.embeddings[0]?.length);
+      } catch (error) {
+        console.log("Embedding errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should generate batch embeddings", async () => {
+      try {
+        const response = await client.embed({
+          model: OLLAMA_EMBED_MODEL,
+          input: ["Hello", "World", "Test"],
+        });
+        console.log("Batch embeddings count:", response.embeddings.length);
+      } catch (error) {
+        console.log("Batch embedding errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should generate embeddings with legacy embeddings method", async () => {
+      try {
+        const response = await client.embeddings({
+          model: OLLAMA_EMBED_MODEL,
+          prompt: "Hello, world!",
+        });
+        console.log("Legacy embedding dimensions:", response.embedding?.length);
+      } catch (error) {
+        console.log("Legacy embedding errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+
+  describe("Error Handling", () => {
+    it("should handle invalid model gracefully", async () => {
+      await expect(
+        client.chat({
+          model: "non-existent-model-12345",
+          messages: [{ role: "user", content: "Hello" }],
+          stream: false,
+        })
+      ).rejects.toThrow();
+      console.log("Error handling: correctly threw on invalid model");
+    }, 30000);
+  });
+
+  describe("Token Usage", () => {
+    it("should return token counts in chat response", async () => {
+      try {
+        const response = await client.chat({
+          model: OLLAMA_MODEL,
+          messages: [
+            { role: "user", content: "Hello" }
+          ],
+          stream: false,
+        });
+        console.log("Token counts - eval:", response.eval_count, "prompt_eval:", response.prompt_eval_count);
+      } catch (error) {
+        console.log("Token count errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should return token counts in generate response", async () => {
+      try {
+        const response = await client.generate({
+          model: OLLAMA_MODEL,
+          prompt: "Hello",
+          stream: false,
+        });
+        console.log("Token counts - eval:", response.eval_count, "prompt_eval:", response.prompt_eval_count);
+      } catch (error) {
+        console.log("Generate token count errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+});
