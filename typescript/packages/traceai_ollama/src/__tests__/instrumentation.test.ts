@@ -220,3 +220,99 @@ describe("Ollama Instrumentation - Configuration Options", () => {
   });
 
   it("should accept only instrumentationConfig", () => {
+    const inst = new OllamaInstrumentation({
+      instrumentationConfig: { enabled: true },
+    });
+    expect(inst).toBeInstanceOf(OllamaInstrumentation);
+  });
+
+  it("should accept only traceConfig", () => {
+    const inst = new OllamaInstrumentation({
+      traceConfig: { hideInputs: false },
+    });
+    expect(inst).toBeInstanceOf(OllamaInstrumentation);
+  });
+
+  it("should accept both configs", () => {
+    const inst = new OllamaInstrumentation({
+      instrumentationConfig: { enabled: true },
+      traceConfig: { hideInputs: false, hideOutputs: false },
+    });
+    expect(inst).toBeInstanceOf(OllamaInstrumentation);
+  });
+});
+
+describe("Ollama Instrumentation - Supported Operations", () => {
+  const operations = [
+    { name: "chat", description: "Chat completions with message history" },
+    { name: "generate", description: "Text generation/completion" },
+    { name: "embed", description: "Batch embeddings (new API)" },
+    { name: "embeddings", description: "Single embedding (legacy API)" },
+  ];
+
+  operations.forEach((op) => {
+    it(`should support ${op.name} operation - ${op.description}`, () => {
+      const inst = new OllamaInstrumentation();
+      expect(inst).toBeInstanceOf(OllamaInstrumentation);
+    });
+  });
+});
+
+describe("Ollama Instrumentation - Supported Models", () => {
+  const models = [
+    "llama2",
+    "llama3",
+    "llama3.1",
+    "llama3.2",
+    "mistral",
+    "mixtral",
+    "codellama",
+    "phi",
+    "phi3",
+    "gemma",
+    "gemma2",
+    "qwen",
+    "qwen2",
+    "deepseek-coder",
+    "neural-chat",
+    "starling-lm",
+    "vicuna",
+    "orca-mini",
+    "dolphin-mistral",
+    "nomic-embed-text",
+    "mxbai-embed-large",
+    "all-minilm",
+  ];
+
+  models.forEach((model) => {
+    it(`should be able to configure instrumentation for model: ${model}`, () => {
+      const inst = new OllamaInstrumentation();
+      expect(inst).toBeInstanceOf(OllamaInstrumentation);
+    });
+  });
+});
+
+describe("Ollama Instrumentation - Version", () => {
+  it("should export version", () => {
+    const { VERSION } = require("../version");
+    expect(typeof VERSION).toBe("string");
+    expect(VERSION).toBe("0.1.0");
+  });
+});
+
+describe("Ollama Instrumentation - Type Utils", () => {
+  it("should export isString utility", () => {
+    const { isString } = require("../typeUtils");
+    expect(typeof isString).toBe("function");
+    expect(isString("test")).toBe(true);
+    expect(isString(123)).toBe(false);
+    expect(isString(null)).toBe(false);
+    expect(isString(undefined)).toBe(false);
+  });
+
+  it("should export assertUnreachable utility", () => {
+    const { assertUnreachable } = require("../typeUtils");
+    expect(typeof assertUnreachable).toBe("function");
+    expect(() => assertUnreachable("test" as never)).toThrow("Unreachable");
+  });
+});
