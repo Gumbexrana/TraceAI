@@ -99,3 +99,47 @@ The following environment variables are required:
 
 ```bash
 # For OpenAI API
+OPENAI_API_KEY=your_openai_api_key
+
+# For TraceAI telemetry
+FI_API_KEY=your_api_key
+FI_SECRET_KEY=your_secret_key
+```
+
+## Features
+
+- Automatic tracing of OpenAI API calls
+- Support for all OpenAI API endpoints:
+  - Chat Completions
+  - Completions
+  - Embeddings
+  - Responses
+- Streaming support for chat completions
+- No manual instrumentation required
+- Integration with TraceAI's observability platform
+
+## Peer Dependencies
+
+This package requires the following peer dependency:
+- `openai`: ^4.0.0
+
+## Development
+
+```bash
+# Install dependencies
+pnpm install
+
+# Build the package
+pnpm build
+
+# Run tests
+pnpm test
+
+# Type checking
+pnpm type:check
+```
+
+## Support
+
+For support, please open an issue in our [GitHub repository](https://github.com/future-agi/traceAI/issues).
+
