@@ -152,3 +152,69 @@ async function main() {
     // // console.log(JSON.stringify(embedding.data[0], null, 2)); // Embeddings can be large
     // console.log(`Embedding for "This is a test for embeddings.": ${embedding.data[0].embedding.slice(0,5)}... [truncated]`);
     // console.log(`Total embeddings received: ${embedding.data.length}`);
+  } catch (error) {
+    console.error("Error making OpenAI Embeddings API call:", error);
+  }
+
+  // 4.3 Make an OpenAI Responses API call (conditionally, if available, as per api.md)
+  // console.log("\n--- Attempting OpenAI responses.create call (as per api.md) ---");
+  if (openai.responses && typeof openai.responses.create === 'function') {
+    // console.log("Found openai.responses.create - attempting call.");
+    try {
+      const response = await openai.responses.create({
+        input: [
+          {
+            type: "message",
+            role: "user", 
+            content: "Generate a response for the responses API (testing client.responses.create)."
+          }
+        ],
+        model: "gpt-4o", // Assuming a compatible model; this might need adjustment
+      });
+      // console.log("OpenAI Responses API call (via client.responses.create) successful:");
+      // console.log(JSON.stringify(response, null, 2));
+    } catch (error) {
+      console.error("Error making OpenAI Responses API call (via client.responses.create):", error);
+    }
+  } else {
+    // console.log("openai.responses.create not found (as per api.md structure), skipping this call.");
+    // Optionally, you could also try the other path here if you want to test both:
+    // // console.log("Attempting (openai as any).OpenAI?.Responses?.prototype?.create as a fallback...");
+    // if ((openai as any).OpenAI?.Responses?.prototype?.create && typeof (openai as any).OpenAI.Responses.prototype.create === 'function') { ... }
+  }
+
+  // 4.4 Make a streaming OpenAI Chat Completion call
+  // console.log("\n--- Making OpenAI chat completion call (STREAMING) ---");
+  try {
+    const stream = await openai.chat.completions.create({
+      messages: [{ role: "user", content: "Tell me a short story, in chunks." }],
+      model: "gpt-4o",
+      stream: true,
+    });
+    // console.log("OpenAI Chat Completions API call (STREAMING) initiated.");
+    let fullStory = "";
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || "";
+      fullStory += content;
+      // process.stdout.write(content); // Optionally print stream in real-time
+    }
+    // console.log("\nFull streamed story: ", fullStory);
+    // console.log("OpenAI Chat Completions API call (STREAMING) successful and consumed.");
+  } catch (error) {
+    console.error("Error making OpenAI Chat Completions API call (STREAMING):", error);
+  }
+
+  // 5. Shutdown the provider to ensure spans are flushed
+  // console.log("\n--- Shutting down tracer provider ---");
+  try {
+    await tracerProvider.shutdown();
+    // console.log("Tracer provider shut down successfully.");
+  } catch (error) {
+    console.error("Error shutting down tracer provider:", error);
+  }
+}
+
+main().catch((error) => {
+  console.error("Unhandled error in main function:", error);
+  process.exit(1);
+}); 
