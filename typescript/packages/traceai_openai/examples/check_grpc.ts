@@ -89,3 +89,43 @@ async function testInstrumentation() {
                             });
                             // Optionally, record response in span
                             grandchildSpan.setAttribute("openai_response_id", response.id || "");
+                        }
+                    });
+                    grandchildSpan.end();
+                }
+            });
+            childSpan.end();
+        }
+    });
+
+    parentSpan.end();
+}
+
+// Main execution combining all approaches
+async function main() {
+    console.log("Starting combined auto + manual tracing example...");
+    console.log("Environment check - OpenAI API Key:", process.env.OPENAI_API_KEY ? "Set" : "NOT SET");
+    
+    try {
+        // Test instrumentation first
+        await testInstrumentation();
+        
+        console.log("\nAll operations completed successfully!");
+        
+    } catch (error) {
+        console.error("Error in main execution:", error);
+        
+        // Even in error handling, we can work with active spans
+        // const activeSpan = trace.getActiveSpan();
+        // if (activeSpan) {
+        //     activeSpan.recordException(error as Error);
+        //     activeSpan.setStatus({ 
+        //         code: 2, 
+        //         message: `Main execution failed: ${(error as Error).message}` 
+        //     });
+        // }
+    }
+}
+
+// Run the example
+main().catch(console.error);
