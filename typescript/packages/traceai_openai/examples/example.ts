@@ -26,3 +26,16 @@ registerInstrumentations({
 });
 
 import OpenAI from 'openai';
+
+async function main() {
+    const openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+    });
+    console.log("OpenAI client initialized",process.env.OPENAI_API_KEY);
+    const response = await openai.chat.completions.create({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: "Hello, world!" }],
+    });
+    console.log(response);
+}
+main();
