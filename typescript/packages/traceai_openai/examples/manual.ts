@@ -224,3 +224,100 @@ async function chainedOperations() {
             
             // Enhance the auto-created span for the second call
             const currentSpan = trace.getActiveSpan();
+            if (currentSpan) {
+                console.log("Enhancing second auto-created span with story metadata");
+                currentSpan.setAttribute("custom.story.title", processedTitle);
+                currentSpan.setAttribute("custom.story.word_count", 
+                    storyResponse.choices[0]?.message?.content?.split(' ').length || 0);
+            } else {
+                console.log("No active span found for second OpenAI call");
+            }
+            
+            return storyResponse;
+        });
+        
+        rootSpan.end();
+    });
+}
+
+// Test function to validate instrumentation is working
+async function testInstrumentation() {
+    console.log("\n=== Testing OpenAI Instrumentation ===");
+    
+    // Simple test to see if spans are created
+    const testSpan = tracer.startSpan("test-span");
+    console.log("Test span created:", testSpan.spanContext());
+    
+    try {
+        console.log("Making simple OpenAI call to test auto instrumentation...");
+        const response = await openai.chat.completions.create({
+            messages: [{ role: "user", content: "Say hello" }],
+            model: "gpt-4o-mini",
+        });
+        
+        console.log("Response received:", {
+            model: response.model,
+            content_length: response.choices[0]?.message?.content?.length
+        });
+        
+        // Check if any spans were created during this call
+        const activeSpan = trace.getActiveSpan();
+        console.log("Active span after simple call:", activeSpan?.spanContext());
+        
+    } catch (error) {
+        console.error("Error in simple test:", error);
+    } finally {
+        testSpan.end();
+    }
+}
+
+// Main execution combining all approaches
+async function main() {
+    console.log("Starting combined auto + manual tracing example...");
+    console.log("Environment check - OpenAI API Key:", process.env.OPENAI_API_KEY ? "Set" : "NOT SET");
+    
+    try {
+        // Test instrumentation first
+        await testInstrumentation();
+        
+        // Example 1: Enhanced auto-instrumentation
+        console.log("\n1. Enhanced text generation...");
+        await enhancedTextGeneration("Write a poem about technology and nature");
+        
+        // Example 2: Manual analysis of auto-instrumented calls
+        console.log("\n2. Processing with analysis...");
+        await processWithAnalysis("Explain quantum computing in simple terms");
+        
+        // Example 3: Chained operations
+        console.log("\n3. Chained operations...");
+        await chainedOperations();
+        
+        console.log("\nAll operations completed successfully!");
+        
+    } catch (error) {
+        console.error("Error in main execution:", error);
+        
+        // Even in error handling, we can work with active spans
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+            activeSpan.recordException(error as Error);
+            activeSpan.setStatus({ 
+                code: 2, 
+                message: `Main execution failed: ${(error as Error).message}` 
+            });
+        }
+    } finally {
+        // Give time for spans to be exported
+        setTimeout(async () => {
+            try {
+                await tracerProvider.shutdown();
+                console.log("Tracer provider shut down successfully.");
+            } catch (error) {
+                console.error("Error shutting down tracer provider:", error);
+            }
+        }, 2000);
+    }
+}
+
+// Run the example
+main().catch(console.error);
