@@ -69,3 +69,34 @@ describeE2E("OpenAI Agents E2E Tests", () => {
         model: OPENAI_API_KEY ? "gpt-4o-mini" : "gemini-2.0-flash",
         tools: [
           (agentsModule as any).tool({
+            name: "get_time",
+            description: "Get the current time",
+            parameters: { type: "object", properties: {} },
+            execute: async () => new Date().toISOString(),
+          }),
+        ],
+      });
+
+      const result = await run(agent, "What time is it?");
+      expect(result).toBeDefined();
+    }, 60000);
+  });
+
+  describe("Error Handling", () => {
+    it("should handle invalid configuration gracefully", async () => {
+      const agentsModule = await import("@openai/agents");
+      const Agent = (agentsModule as any).Agent;
+      const run = (agentsModule as any).run;
+
+      const agent = new Agent({
+        name: "error-agent",
+        instructions: "Test agent.",
+        model: "non-existent-model-12345",
+      });
+
+      await expect(
+        run(agent, "Hello")
+      ).rejects.toThrow();
+    }, 30000);
+  });
+});
