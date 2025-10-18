@@ -182,3 +182,83 @@ describe("FITracingProcessor", () => {
       const handoffSpan = {
         spanId: "span-4",
         traceId: "test-trace-5",
+        startedAt: new Date().toISOString(),
+        spanData: {
+          type: "handoff",
+          fromAgent: "Assistant",
+          toAgent: "Specialist",
+        },
+      };
+
+      processor.onSpanStart(handoffSpan);
+      processor.onSpanEnd(handoffSpan);
+      processor.onTraceEnd(trace);
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans.length).toBe(2);
+      expect(spans[0].name).toBe("handoff to Specialist");
+    });
+
+    it("should handle response spans with input/output", () => {
+      const trace = { traceId: "test-trace-6", name: "Agent Run" };
+      processor.onTraceStart(trace);
+
+      const responseSpan = {
+        spanId: "span-5",
+        traceId: "test-trace-6",
+        startedAt: new Date().toISOString(),
+        spanData: {
+          type: "response",
+          input: "What is the weather?",
+          response: {
+            output: [
+              {
+                type: "message",
+                content: [{ type: "output_text", text: "The weather is sunny." }],
+              },
+            ],
+          },
+        },
+      };
+
+      processor.onSpanStart(responseSpan);
+      processor.onSpanEnd(responseSpan);
+      processor.onTraceEnd(trace);
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans.length).toBe(2);
+    });
+
+    it("should set error status on span error", () => {
+      const trace = { traceId: "test-trace-7", name: "Agent Run" };
+      processor.onTraceStart(trace);
+
+      const errorSpan = {
+        spanId: "span-6",
+        traceId: "test-trace-7",
+        startedAt: new Date().toISOString(),
+        spanData: {
+          type: "function",
+          name: "failing_tool",
+        },
+        error: { message: "Tool failed", data: "Connection timeout" },
+      };
+
+      processor.onSpanStart(errorSpan);
+      processor.onSpanEnd(errorSpan);
+      processor.onTraceEnd(trace);
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans.length).toBe(2);
+      expect(spans[0].status.code).toBe(2); // SpanStatusCode.ERROR
+    });
+  });
+
+  describe("shutdown", () => {
+    it("should clean up internal state", () => {
+      processor.shutdown();
+      // Should not throw
+      expect(true).toBe(true);
+    });
+  });
+});
