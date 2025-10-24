@@ -302,3 +302,134 @@ async function tenantVectorSearch(
        content,
        embedding <=> $2 AS distance
      FROM tenant_documents
+     WHERE tenant_id = $1
+     ORDER BY embedding <=> $2
+     LIMIT $3`,
+    [tenantId, JSON.stringify(queryVector), limit]
+  );
+
+  return result.rows;
+}
+```
+
+### 6. Approximate Nearest Neighbor with HNSW Index
+
+```typescript
+// First, create an HNSW index for faster approximate search
+async function createHNSWIndex() {
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS documents_embedding_hnsw_idx
+    ON documents
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64)
+  `);
+}
+
+// Then use it for fast approximate search
+async function fastVectorSearch(queryVector: number[], limit = 10) {
+  // Set search parameters for quality/speed tradeoff
+  await pool.query("SET hnsw.ef_search = 100");
+
+  // ANN search using HNSW index (traced)
+  const result = await pool.query(
+    `SELECT
+       id,
+       content,
+       1 - (embedding <=> $1) AS similarity
+     FROM documents
+     ORDER BY embedding <=> $1
+     LIMIT $2`,
+    [JSON.stringify(queryVector), limit]
+  );
+
+  return result.rows;
+}
+```
+
+### 7. Real-time Analytics with Vector Clustering
+
+```typescript
+async function clusterAnalytics(centroidVectors: number[][]) {
+  // Assign each document to nearest cluster (traced)
+  const result = await pool.query(
+    `WITH centroids AS (
+       SELECT
+         row_number() OVER () AS cluster_id,
+         centroid::vector AS centroid
+       FROM unnest($1::text[]) AS centroid
+     )
+     SELECT
+       c.cluster_id,
+       COUNT(*) AS document_count,
+       AVG(d.embedding <-> c.centroid) AS avg_distance
+     FROM documents d
+     CROSS JOIN LATERAL (
+       SELECT cluster_id, centroid
+       FROM centroids
+       ORDER BY d.embedding <-> centroid
+       LIMIT 1
+     ) c
+     GROUP BY c.cluster_id
+     ORDER BY c.cluster_id`,
+    [centroidVectors.map((v) => JSON.stringify(v))]
+  );
+
+  return result.rows;
+}
+```
+
+## Database Setup
+
+```sql
+-- Enable pgvector extension
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Create table with vector column
+CREATE TABLE documents (
+  id SERIAL PRIMARY KEY,
+  content TEXT NOT NULL,
+  embedding vector(1536), -- dimensions must match your embedding model
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create indexes for different distance metrics
+
+-- HNSW index for cosine similarity (recommended for most use cases)
+CREATE INDEX documents_embedding_cosine_idx
+ON documents USING hnsw (embedding vector_cosine_ops);
+
+-- IVFFlat index for L2 distance (faster to build, uses less memory)
+CREATE INDEX documents_embedding_l2_idx
+ON documents USING ivfflat (embedding vector_l2_ops)
+WITH (lists = 100);
+```
+
+## Integration with OpenTelemetry
+
+```typescript
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { PgVectorInstrumentation } from "@traceai/pgvector";
+
+const sdk = new NodeSDK({
+  traceExporter: new OTLPTraceExporter({
+    url: "http://localhost:4318/v1/traces",
+  }),
+  instrumentations: [new PgVectorInstrumentation()],
+});
+
+sdk.start();
+```
+
+## Performance Tips
+
+1. **Use HNSW indexes** for production workloads - faster queries with minimal accuracy loss
+2. **Tune `ef_search`** parameter based on your recall requirements
+3. **Partition large tables** by tenant or time for better performance
+4. **Use connection pooling** (PgBouncer or built-in pg Pool)
+5. **Consider quantization** for very large datasets
+
+## License
+
+Apache-2.0
