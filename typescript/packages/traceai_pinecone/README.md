@@ -253,3 +253,386 @@ class MultiTenantVectorStore {
 
   // Query within tenant namespace only (traced)
   async queryForTenant(tenantId: string, queryVector: number[], options: any = {}) {
+    const ns = this.index.namespace(`tenant_${tenantId}`);
+
+    return await ns.query({
+      vector: queryVector,
+      topK: options.topK || 10,
+      includeMetadata: true,
+      filter: options.filter,
+    });
+  }
+
+  // Get tenant usage statistics (traced)
+  async getTenantStats(tenantId: string) {
+    const stats = await this.index.describeIndexStats();
+    const tenantNamespace = `tenant_${tenantId}`;
+
+    return {
+      vectorCount: stats.namespaces[tenantNamespace]?.recordCount || 0,
+      totalIndexVectors: stats.totalRecordCount,
+    };
+  }
+
+  // Clean up tenant data on deletion (traced)
+  async deleteTenant(tenantId: string) {
+    const ns = this.index.namespace(`tenant_${tenantId}`);
+    await ns.deleteAll();
+  }
+}
+
+// Usage
+const vectorStore = new MultiTenantVectorStore("saas-production");
+
+// Store data for tenant
+await vectorStore.storeForTenant("acme-corp", customerDocuments);
+
+// Query within tenant isolation
+const results = await vectorStore.queryForTenant("acme-corp", queryVector, {
+  topK: 5,
+  filter: { document_type: "contract" },
+});
+```
+
+### 3. Real-Time Recommendation Engine
+
+Product recommendations with hybrid filtering:
+
+```typescript
+class RecommendationEngine {
+  private index: any;
+
+  constructor() {
+    const pinecone = new Pinecone();
+    this.index = pinecone.index("product-embeddings");
+  }
+
+  // Index product catalog (traced)
+  async indexProducts(products: Product[]) {
+    const batches = this.chunk(products, 100);
+
+    for (const batch of batches) {
+      await this.index.upsert(
+        batch.map(p => ({
+          id: p.id,
+          values: p.embedding,
+          metadata: {
+            name: p.name,
+            category: p.category,
+            brand: p.brand,
+            price: p.price,
+            rating: p.rating,
+            in_stock: p.inStock,
+            tags: p.tags,
+          },
+        }))
+      );
+    }
+  }
+
+  // Find similar products (traced)
+  async findSimilar(productId: string, options: RecommendationOptions = {}) {
+    // Fetch the source product embedding
+    const { records } = await this.index.fetch([productId]);
+    const sourceProduct = records[productId];
+
+    if (!sourceProduct) {
+      throw new Error(`Product ${productId} not found`);
+    }
+
+    // Query for similar products with filters
+    const results = await this.index.query({
+      vector: sourceProduct.values,
+      topK: options.limit || 10,
+      includeMetadata: true,
+      filter: {
+        $and: [
+          // Exclude the source product
+          { id: { $ne: productId } },
+          // Only in-stock items
+          { in_stock: { $eq: true } },
+          // Optional category filter
+          ...(options.sameCategory
+            ? [{ category: { $eq: sourceProduct.metadata?.category } }]
+            : []),
+          // Price range filter
+          ...(options.maxPrice
+            ? [{ price: { $lte: options.maxPrice } }]
+            : []),
+        ],
+      },
+    });
+
+    return results.matches.map(m => ({
+      id: m.id,
+      score: m.score,
+      ...m.metadata,
+    }));
+  }
+
+  // Personalized recommendations (traced)
+  async getPersonalized(userEmbedding: number[], preferences: UserPreferences) {
+    const results = await this.index.query({
+      vector: userEmbedding,
+      topK: 20,
+      includeMetadata: true,
+      filter: {
+        $and: [
+          { in_stock: { $eq: true } },
+          { category: { $in: preferences.favoriteCategories } },
+          { brand: { $in: preferences.preferredBrands } },
+          { price: { $lte: preferences.maxBudget } },
+          { rating: { $gte: 4.0 } },
+        ],
+      },
+    });
+
+    return results.matches;
+  }
+
+  private chunk<T>(array: T[], size: number): T[][] {
+    return Array.from({ length: Math.ceil(array.length / size) }, (_, i) =>
+      array.slice(i * size, i * size + size)
+    );
+  }
+}
+```
+
+### 4. Semantic Code Search
+
+Search code repositories by natural language:
+
+```typescript
+class CodeSearchEngine {
+  private index: any;
+
+  constructor() {
+    const pinecone = new Pinecone();
+    this.index = pinecone.index("code-embeddings");
+  }
+
+  // Index code files (traced)
+  async indexRepository(repoId: string, files: CodeFile[]) {
+    const ns = this.index.namespace(`repo_${repoId}`);
+
+    // Chunk files into smaller pieces
+    const chunks = files.flatMap(file =>
+      this.chunkCode(file).map((chunk, i) => ({
+        id: `${file.path}_chunk_${i}`,
+        values: chunk.embedding,
+        metadata: {
+          repo_id: repoId,
+          file_path: file.path,
+          language: file.language,
+          start_line: chunk.startLine,
+          end_line: chunk.endLine,
+          content: chunk.content,
+          functions: chunk.functions,
+        },
+      }))
+    );
+
+    // Batch upsert
+    for (let i = 0; i < chunks.length; i += 100) {
+      await ns.upsert(chunks.slice(i, i + 100));
+    }
+  }
+
+  // Natural language code search (traced)
+  async search(repoId: string, query: string, options: SearchOptions = {}) {
+    const ns = this.index.namespace(`repo_${repoId}`);
+    const queryEmbedding = await this.getEmbedding(query);
+
+    const filter: any = {};
+    if (options.language) {
+      filter.language = { $eq: options.language };
+    }
+    if (options.filePath) {
+      filter.file_path = { $eq: options.filePath };
+    }
+
+    const results = await ns.query({
+      vector: queryEmbedding,
+      topK: options.limit || 10,
+      includeMetadata: true,
+      filter: Object.keys(filter).length > 0 ? filter : undefined,
+    });
+
+    return results.matches.map(m => ({
+      filePath: m.metadata?.file_path,
+      language: m.metadata?.language,
+      content: m.metadata?.content,
+      startLine: m.metadata?.start_line,
+      endLine: m.metadata?.end_line,
+      score: m.score,
+    }));
+  }
+
+  // Find similar code patterns (traced)
+  async findSimilarCode(codeSnippet: string, repoId: string) {
+    const ns = this.index.namespace(`repo_${repoId}`);
+    const codeEmbedding = await this.getEmbedding(codeSnippet);
+
+    const results = await ns.query({
+      vector: codeEmbedding,
+      topK: 5,
+      includeMetadata: true,
+    });
+
+    return results.matches;
+  }
+
+  private chunkCode(file: CodeFile) {
+    // Implementation for chunking code files
+    return [];
+  }
+
+  private async getEmbedding(text: string): Promise<number[]> {
+    // Implementation for getting embeddings
+    return [];
+  }
+}
+```
+
+### 5. Anomaly Detection Pipeline
+
+Detect anomalies using vector similarity:
+
+```typescript
+class AnomalyDetector {
+  private index: any;
+  private threshold: number;
+
+  constructor(threshold = 0.7) {
+    const pinecone = new Pinecone();
+    this.index = pinecone.index("behavior-patterns");
+    this.threshold = threshold;
+  }
+
+  // Index normal behavior patterns (traced)
+  async indexNormalPatterns(patterns: BehaviorPattern[]) {
+    await this.index.namespace("normal").upsert(
+      patterns.map(p => ({
+        id: p.id,
+        values: p.embedding,
+        metadata: {
+          pattern_type: p.type,
+          frequency: p.frequency,
+          timestamp: p.timestamp,
+        },
+      }))
+    );
+  }
+
+  // Check if behavior is anomalous (traced)
+  async detectAnomaly(behaviorEmbedding: number[]): Promise<AnomalyResult> {
+    const results = await this.index.namespace("normal").query({
+      vector: behaviorEmbedding,
+      topK: 5,
+      includeMetadata: true,
+    });
+
+    // If no close matches, it's anomalous
+    const maxSimilarity = results.matches[0]?.score || 0;
+    const isAnomalous = maxSimilarity < this.threshold;
+
+    return {
+      isAnomalous,
+      confidence: isAnomalous ? 1 - maxSimilarity : maxSimilarity,
+      closestPatterns: results.matches.slice(0, 3),
+    };
+  }
+
+  // Batch anomaly detection (traced)
+  async detectAnomaliesBatch(behaviors: number[][]): Promise<AnomalyResult[]> {
+    return Promise.all(
+      behaviors.map(b => this.detectAnomaly(b))
+    );
+  }
+}
+```
+
+## Performance Tips
+
+### Batch Operations
+
+For high-throughput scenarios, batch your upserts:
+
+```typescript
+async function batchUpsert(index: any, vectors: any[], batchSize = 100) {
+  for (let i = 0; i < vectors.length; i += batchSize) {
+    const batch = vectors.slice(i, i + batchSize);
+    await index.upsert(batch);  // Each batch creates a trace span
+  }
+}
+```
+
+### Use Namespaces for Isolation
+
+Namespaces provide logical separation and can improve query performance:
+
+```typescript
+// Separate by data type
+const docsIndex = index.namespace("documents");
+const productsIndex = index.namespace("products");
+
+// Or by tenant
+const tenantIndex = index.namespace(`tenant_${tenantId}`);
+```
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PINECONE_API_KEY` | Your Pinecone API key |
+| `FI_API_KEY` | Your Future AGI API key |
+| `FI_PROJECT_NAME` | Your project name |
+
+## Troubleshooting
+
+### Connection Issues
+
+Ensure your Pinecone API key is valid and the index exists:
+
+```typescript
+const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
+const indexes = await pinecone.listIndexes();
+console.log("Available indexes:", indexes);
+```
+
+### Large Span Sizes
+
+Disable vector capture for production:
+
+```typescript
+new PineconeInstrumentation({
+  instrumentationConfig: {
+    captureQueryVectors: false,
+    captureResultVectors: false,
+  },
+});
+```
+
+## Development
+
+```bash
+# Build
+pnpm build
+
+# Run tests
+pnpm test
+
+# Type check
+pnpm tsc --noEmit
+```
+
+## License
+
+Apache-2.0
+
+## Links
+
+- [Future AGI Documentation](https://docs.futureagi.com)
+- [Pinecone Documentation](https://docs.pinecone.io)
+- [OpenTelemetry](https://opentelemetry.io)
+- [GitHub Issues](https://github.com/future-agi/traceAI/issues)
