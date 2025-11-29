@@ -510,3 +510,223 @@ describe("Pinecone Instrumentation - Real World Scenarios", () => {
     it("should trace namespace-isolated queries", async () => {
       const mockIndex = {
         indexName: "multi_tenant_index",
+        query: (jest.fn() as MockFn).mockResolvedValue({
+          matches: [{ id: "item_1", score: 0.92 }],
+        }),
+      };
+
+      const mockModule = {
+        Index: {
+          prototype: {
+            query: mockIndex.query,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Query with tenant namespace isolation
+      const queryParams = {
+        vector: new Array(768).fill(0).map(() => Math.random()),
+        topK: 10,
+        namespace: "tenant_abc123", // Tenant isolation via namespace
+        includeMetadata: true,
+      };
+
+      await mockModule.Index.prototype.query.call(mockIndex, queryParams);
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+
+    it("should trace tenant data ingestion", async () => {
+      const mockIndex = {
+        indexName: "multi_tenant_index",
+        namespace: "tenant_xyz789",
+        upsert: (jest.fn() as MockFn).mockResolvedValue({ upsertedCount: 100 }),
+      };
+
+      const mockModule = {
+        Index: {
+          prototype: {
+            upsert: mockIndex.upsert,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Batch upsert for tenant
+      const vectors = Array.from({ length: 100 }, (_, i) => ({
+        id: `tenant_xyz789_item_${i}`,
+        values: new Array(768).fill(0).map(() => Math.random()),
+        metadata: {
+          tenant_id: "xyz789",
+          item_type: "product",
+          created_at: new Date().toISOString(),
+        },
+      }));
+
+      await mockModule.Index.prototype.upsert.call(mockIndex, vectors);
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("Recommendation Engine", () => {
+    it("should trace similar item lookup", async () => {
+      const mockIndex = {
+        indexName: "product_embeddings",
+        query: (jest.fn() as MockFn).mockResolvedValue({
+          matches: [
+            { id: "prod_456", score: 0.94, metadata: { name: "Similar Product 1", price: 29.99 } },
+            { id: "prod_789", score: 0.89, metadata: { name: "Similar Product 2", price: 34.99 } },
+          ],
+        }),
+        fetch: (jest.fn() as MockFn).mockResolvedValue({
+          records: {
+            prod_123: {
+              id: "prod_123",
+              values: new Array(512).fill(0.1),
+              metadata: { name: "Source Product" },
+            },
+          },
+        }),
+      };
+
+      const mockModule = {
+        Index: {
+          prototype: {
+            query: mockIndex.query,
+            fetch: mockIndex.fetch,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Fetch the source product embedding
+      const sourceProduct = await mockModule.Index.prototype.fetch.call(mockIndex, ["prod_123"]);
+
+      // Find similar products
+      const queryParams = {
+        vector: sourceProduct.records.prod_123.values,
+        topK: 10,
+        filter: {
+          category: { $eq: "electronics" },
+          in_stock: { $eq: true },
+        },
+        includeMetadata: true,
+      };
+
+      const recommendations = await mockModule.Index.prototype.query.call(mockIndex, queryParams);
+
+      expect(recommendations.matches.length).toBeGreaterThan(0);
+      expect(mockSpan.end).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("Index Maintenance", () => {
+    it("should trace index statistics retrieval", async () => {
+      const mockIndex = {
+        indexName: "production_index",
+        describeIndexStats: (jest.fn() as MockFn).mockResolvedValue({
+          totalRecordCount: 1500000,
+          dimension: 1536,
+          indexFullness: 0.75,
+          namespaces: {
+            "documents": { recordCount: 500000 },
+            "products": { recordCount: 750000 },
+            "users": { recordCount: 250000 },
+          },
+        }),
+      };
+
+      const mockModule = {
+        Index: {
+          prototype: {
+            describeIndexStats: mockIndex.describeIndexStats,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      const stats = await mockModule.Index.prototype.describeIndexStats.call(mockIndex);
+
+      expect(stats.totalRecordCount).toBe(1500000);
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+
+    it("should trace namespace cleanup", async () => {
+      const mockIndex = {
+        indexName: "production_index",
+        deleteAll: (jest.fn() as MockFn).mockResolvedValue({}),
+      };
+
+      const mockModule = {
+        Index: {
+          prototype: {
+            deleteAll: mockIndex.deleteAll,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Clear a namespace (e.g., for data refresh)
+      await mockModule.Index.prototype.deleteAll.call(mockIndex);
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("Hybrid Search Scenario", () => {
+    it("should trace filtered semantic search", async () => {
+      const mockIndex = {
+        indexName: "ecommerce_index",
+        query: (jest.fn() as MockFn).mockResolvedValue({
+          matches: [
+            {
+              id: "item_001",
+              score: 0.96,
+              metadata: {
+                title: "Wireless Headphones",
+                brand: "Sony",
+                price: 149.99,
+                rating: 4.5,
+              },
+            },
+          ],
+        }),
+      };
+
+      const mockModule = {
+        Index: {
+          prototype: {
+            query: mockIndex.query,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Hybrid search: semantic similarity + metadata filters
+      const queryParams = {
+        vector: new Array(1536).fill(0).map(() => Math.random()),
+        topK: 20,
+        filter: {
+          $and: [
+            { price: { $lte: 200 } },
+            { rating: { $gte: 4.0 } },
+            { brand: { $in: ["Sony", "Bose", "Apple"] } },
+          ],
+        },
+        includeMetadata: true,
+      };
+
+      await mockModule.Index.prototype.query.call(mockIndex, queryParams);
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+});
