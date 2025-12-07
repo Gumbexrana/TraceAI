@@ -7,3 +7,7 @@
     "outDir": "dist/esnext"
   },
   "exclude": [
+    "src/**/*.test.ts",
+    "src/**/__tests__/**"
+  ]
+}
