@@ -63,3 +63,32 @@ async function main() {
     },
   });
 
+  // Connect to server - will be traced
+  await client.connect();
+  console.log("Connected to Pipecat");
+
+  // Send a text message - will be traced
+  await client.sendMessage({
+    type: "text",
+    content: "Hello, how are you?",
+  });
+
+  // Execute an action - will be traced
+  const result = await client.action({
+    service: "tts",
+    action: "say",
+    arguments: {
+      text: "This is a test message",
+    },
+  });
+  console.log("Action result:", result);
+
+  // Disconnect - will be traced
+  await client.disconnect();
+  console.log("Disconnected from Pipecat");
+  */
+
+  console.log("Instrumentation is active and ready to trace Pipecat calls.");
+}
+
+main().catch(console.error);
