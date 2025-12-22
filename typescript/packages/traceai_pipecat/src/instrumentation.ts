@@ -369,3 +369,163 @@ export class PipecatInstrumentation extends InstrumentationBase {
         safelyJSONStringify([{ role: "user", content: message }]) ?? "[]"
       );
     } else if (message?.content) {
+      span.setAttribute(
+        SemanticConventions.LLM_INPUT_MESSAGES,
+        safelyJSONStringify([{ role: message.role || "user", content: message.content }]) ?? "[]"
+      );
+    }
+
+    const execContext = trace.setSpan(context.active(), span);
+
+    try {
+      const result = await context.with(execContext, () => {
+        return original.apply(instance, args);
+      });
+
+      span.setAttributes({
+        [SemanticConventions.OUTPUT_VALUE]: safeJsonStringify(result),
+        [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.JSON,
+      });
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.end();
+
+      return result;
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (error as Error).message,
+      });
+      span.end();
+      throw error;
+    }
+  }
+
+  private async tracePipelineRun(
+    original: Function,
+    instance: any,
+    args: any[]
+  ): Promise<any> {
+    const pipelineName = instance.name || instance.constructor?.name || "Pipeline";
+
+    const span = this.fiTracer.startSpan(`Pipecat Pipeline: ${pipelineName}`, {
+      kind: SpanKind.INTERNAL,
+      attributes: {
+        [SemanticConventions.FI_SPAN_KIND]: FISpanKind.CHAIN,
+        "pipecat.operation": "pipeline.run",
+        "pipecat.pipeline_name": pipelineName,
+        [SemanticConventions.INPUT_VALUE]: safeJsonStringify({
+          pipeline: pipelineName,
+          args: args.length > 0 ? args[0] : null,
+        }),
+      },
+    });
+
+    const execContext = trace.setSpan(context.active(), span);
+
+    try {
+      const result = await context.with(execContext, () => {
+        return original.apply(instance, args);
+      });
+
+      span.setAttributes({
+        [SemanticConventions.OUTPUT_VALUE]: safeJsonStringify(result),
+      });
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.end();
+
+      return result;
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (error as Error).message,
+      });
+      span.end();
+      throw error;
+    }
+  }
+
+  private async traceFrameProcess(
+    original: Function,
+    instance: any,
+    args: any[]
+  ): Promise<any> {
+    const frame = args[0];
+    const frameType = frame?.type || frame?.constructor?.name || "unknown";
+    const processorName = instance.name || instance.constructor?.name || "FrameProcessor";
+
+    const span = this.fiTracer.startSpan(`Pipecat Process Frame: ${frameType}`, {
+      kind: SpanKind.INTERNAL,
+      attributes: {
+        [SemanticConventions.FI_SPAN_KIND]: FISpanKind.CHAIN,
+        "pipecat.operation": "frame.process",
+        "pipecat.frame_type": frameType,
+        "pipecat.processor": processorName,
+      },
+    });
+
+    const execContext = trace.setSpan(context.active(), span);
+
+    try {
+      const result = await context.with(execContext, () => {
+        return original.apply(instance, args);
+      });
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.end();
+
+      return result;
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (error as Error).message,
+      });
+      span.end();
+      throw error;
+    }
+  }
+
+  private sanitizeUrl(url: string): string {
+    try {
+      const parsed = new URL(url);
+      return `${parsed.protocol}//${parsed.host}`;
+    } catch {
+      return url.split("?")[0]; // Remove query params at minimum
+    }
+  }
+}
+
+// Global patched flag
+let _isFIPatched = false;
+
+/**
+ * Check if the module has been patched.
+ */
+export function isPatched(): boolean {
+  return _isFIPatched;
+}
+
+/**
+ * Reset the patched state (for testing only).
+ */
+export function _resetPatchedStateForTesting(): void {
+  _isFIPatched = false;
+}
+
+// Helper functions
+
+function safeJsonStringify(obj: unknown): string {
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    return String(obj);
+  }
+}
+
+function generateId(): string {
+  return Math.random().toString(36).substring(2, 15);
+}
