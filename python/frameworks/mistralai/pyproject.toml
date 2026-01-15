@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "traceAI-mistralai"
+version = "0.1.8"
+description = "OpenTelemetry instrumentation for Mistral AI"
+authors = ["Future AGI <no-reply@futureagi.com>"]
+readme = "README.md"
+packages = [
+    { include = "traceai_mistralai" }
+]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.14"
+fi-instrumentation-otel = ">=0.1.11"
+mistralai = ">=1.0.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
