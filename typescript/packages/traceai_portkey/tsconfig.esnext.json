@@ -3,3 +3,11 @@
   "compilerOptions": {
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "target": "ESNext",
+    "outDir": "dist/esnext"
+  },
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/__tests__/**"
+  ]
+}
