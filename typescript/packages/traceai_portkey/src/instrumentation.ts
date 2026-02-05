@@ -162,3 +162,250 @@ export class PortkeyInstrumentation extends InstrumentationBase {
       attributes: {
         [SemanticConventions.FI_SPAN_KIND]: FISpanKind.LLM,
         [SemanticConventions.LLM_PROVIDER]: "portkey",
+        [SemanticConventions.LLM_MODEL_NAME]: model,
+        [SemanticConventions.GEN_AI_OPERATION_NAME]: "chat",
+        [SemanticConventions.INPUT_VALUE]: safeJsonStringify(params),
+        [SemanticConventions.INPUT_MIME_TYPE]: MimeType.JSON,
+        [SemanticConventions.LLM_INPUT_MESSAGES]: safelyJSONStringify(serializedMessages) ?? "[]",
+        [SemanticConventions.RAW_INPUT]: safeJsonStringify(params),
+      },
+    });
+
+    const execContext = trace.setSpan(context.active(), span);
+
+    try {
+      const result = await context.with(execContext, () => {
+        return original.apply(instance, args);
+      });
+
+      // Handle streaming
+      if (result && typeof result[Symbol.asyncIterator] === "function") {
+        return this.wrapStream(result, span);
+      }
+
+      // Non-streaming response
+      this.setResponseAttributes(span, result);
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.end();
+
+      return result;
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (error as Error).message,
+      });
+      span.end();
+      throw error;
+    }
+  }
+
+  private async traceCompletion(
+    original: Function,
+    instance: any,
+    args: any[]
+  ): Promise<any> {
+    const params = args[0] || {};
+    const model = params.model || "unknown";
+
+    const span = this.fiTracer.startSpan("Portkey Completions", {
+      kind: SpanKind.INTERNAL,
+      attributes: {
+        [SemanticConventions.FI_SPAN_KIND]: FISpanKind.LLM,
+        [SemanticConventions.LLM_PROVIDER]: "portkey",
+        [SemanticConventions.LLM_MODEL_NAME]: model,
+        [SemanticConventions.GEN_AI_OPERATION_NAME]: "text_completion",
+        [SemanticConventions.INPUT_VALUE]: params.prompt || safeJsonStringify(params),
+        [SemanticConventions.RAW_INPUT]: safeJsonStringify(params),
+      },
+    });
+
+    const execContext = trace.setSpan(context.active(), span);
+
+    try {
+      const result = await context.with(execContext, () => {
+        return original.apply(instance, args);
+      });
+
+      span.setAttributes({
+        [SemanticConventions.OUTPUT_VALUE]: safeJsonStringify(result),
+        [SemanticConventions.RAW_OUTPUT]: safeJsonStringify(result),
+      });
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.end();
+
+      return result;
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (error as Error).message,
+      });
+      span.end();
+      throw error;
+    }
+  }
+
+  private async traceEmbedding(
+    original: Function,
+    instance: any,
+    args: any[]
+  ): Promise<any> {
+    const params = args[0] || {};
+    const model = params.model || "unknown";
+    const input = params.input;
+
+    const span = this.fiTracer.startSpan("Portkey Embeddings", {
+      kind: SpanKind.INTERNAL,
+      attributes: {
+        [SemanticConventions.FI_SPAN_KIND]: FISpanKind.EMBEDDING,
+        [SemanticConventions.LLM_PROVIDER]: "portkey",
+        [SemanticConventions.LLM_MODEL_NAME]: model,
+        [SemanticConventions.GEN_AI_OPERATION_NAME]: "embeddings",
+        [SemanticConventions.EMBEDDING_MODEL_NAME]: model,
+        [SemanticConventions.INPUT_VALUE]: Array.isArray(input)
+          ? safeJsonStringify(input)
+          : input,
+        [SemanticConventions.RAW_INPUT]: safeJsonStringify(params),
+      },
+    });
+
+    const execContext = trace.setSpan(context.active(), span);
+
+    try {
+      const result = await context.with(execContext, () => {
+        return original.apply(instance, args);
+      });
+
+      if (result?.data?.length) {
+        span.setAttribute("embedding.vector_count", result.data.length);
+      }
+      if (result?.usage) {
+        span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_PROMPT, result.usage.prompt_tokens);
+        span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_TOTAL, result.usage.total_tokens);
+      }
+
+      span.setAttributes({
+        [SemanticConventions.RAW_OUTPUT]: safeJsonStringify(result),
+      });
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.end();
+
+      return result;
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (error as Error).message,
+      });
+      span.end();
+      throw error;
+    }
+  }
+
+  private setResponseAttributes(span: Span, result: any): void {
+    if (!result) return;
+
+    if (result.model) {
+      span.setAttribute(SemanticConventions.LLM_MODEL_NAME, result.model);
+      span.setAttribute(SemanticConventions.GEN_AI_RESPONSE_MODEL, result.model);
+    }
+    if (result.id) {
+      span.setAttribute(SemanticConventions.GEN_AI_RESPONSE_ID, result.id);
+    }
+
+    if (result.choices?.[0]?.message) {
+      const message = result.choices[0].message;
+      const msg: Record<string, unknown> = { role: message.role || "assistant" };
+      if (message.content) {
+        msg.content = message.content;
+        span.setAttribute(SemanticConventions.OUTPUT_VALUE, message.content);
+      }
+      span.setAttribute(
+        SemanticConventions.LLM_OUTPUT_MESSAGES,
+        safelyJSONStringify([msg]) ?? "[]"
+      );
+      span.setAttribute(
+        SemanticConventions.GEN_AI_RESPONSE_FINISH_REASONS,
+        safelyJSONStringify(result.choices.map((c: any) => c.finish_reason)) ?? "[]"
+      );
+    }
+
+    if (result.usage) {
+      span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_PROMPT, result.usage.prompt_tokens);
+      span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_COMPLETION, result.usage.completion_tokens);
+      span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_TOTAL, result.usage.total_tokens);
+    }
+
+    span.setAttribute(SemanticConventions.RAW_OUTPUT, safeJsonStringify(result));
+  }
+
+  private async *wrapStream(stream: AsyncIterable<any>, span: Span): AsyncIterable<any> {
+    const chunks: any[] = [];
+    let fullContent = "";
+
+    try {
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+        if (chunk.choices?.[0]?.delta?.content) {
+          fullContent += chunk.choices[0].delta.content;
+        }
+        yield chunk;
+      }
+
+      span.setAttributes({
+        [SemanticConventions.OUTPUT_VALUE]: fullContent,
+        [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify([{ role: "assistant", content: fullContent }]) ?? "[]",
+        [SemanticConventions.RAW_OUTPUT]: safeJsonStringify(chunks),
+      });
+
+      // Get usage from last chunk if available
+      const lastChunk = chunks[chunks.length - 1];
+      if (lastChunk?.usage) {
+        span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_PROMPT, lastChunk.usage.prompt_tokens);
+        span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_COMPLETION, lastChunk.usage.completion_tokens);
+        span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_TOTAL, lastChunk.usage.total_tokens);
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (error as Error).message,
+      });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+}
+
+// Global patched flag
+let _isFIPatched = false;
+
+/**
+ * Check if the module has been patched.
+ */
+export function isPatched(): boolean {
+  return _isFIPatched;
+}
+
+/**
+ * Reset the patched state (for testing only).
+ */
+export function _resetPatchedStateForTesting(): void {
+  _isFIPatched = false;
+}
+
+// Helper functions
+
+function safeJsonStringify(obj: unknown): string {
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    return String(obj);
+  }
+}
