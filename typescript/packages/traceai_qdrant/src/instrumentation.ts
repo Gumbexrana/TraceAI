@@ -490,3 +490,214 @@ export class QdrantInstrumentation extends InstrumentationBase {
   private async wrapDelete(
     original: Function,
     instance: any,
+    collectionName: string,
+    params: any
+  ): Promise<any> {
+    const attributes = this.getCommonAttributes("delete", collectionName);
+
+    if (params?.points) {
+      attributes[VectorDBConventions.DB_VECTOR_DELETE_COUNT] =
+        Array.isArray(params.points) ? params.points.length : 1;
+    }
+
+    if (params?.filter) {
+      attributes[VectorDBConventions.DB_VECTOR_QUERY_FILTER] =
+        JSON.stringify(params.filter);
+    }
+
+    const span = this.fiTracer.startSpan("qdrant delete", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, collectionName, params)
+      );
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapRetrieve(
+    original: Function,
+    instance: any,
+    collectionName: string,
+    params: any
+  ): Promise<any> {
+    const attributes = this.getCommonAttributes("retrieve", collectionName);
+
+    const ids = params?.ids || [];
+    attributes["db.vector.retrieve.ids_count"] = ids.length;
+
+    const span = this.fiTracer.startSpan("qdrant retrieve", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, collectionName, params)
+      );
+
+      if (Array.isArray(result)) {
+        span.setAttribute(
+          VectorDBConventions.DB_VECTOR_RESULTS_COUNT,
+          result.length
+        );
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapScroll(
+    original: Function,
+    instance: any,
+    collectionName: string,
+    params?: any
+  ): Promise<any> {
+    const attributes = this.getCommonAttributes("scroll", collectionName);
+
+    if (params?.limit) {
+      attributes[VectorDBConventions.DB_VECTOR_QUERY_TOP_K] =
+        params.limit;
+    }
+
+    if (params?.filter) {
+      attributes[VectorDBConventions.DB_VECTOR_QUERY_FILTER] =
+        JSON.stringify(params.filter);
+    }
+
+    const span = this.fiTracer.startSpan("qdrant scroll", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, collectionName, params)
+      );
+
+      if (result?.points) {
+        span.setAttribute(
+          VectorDBConventions.DB_VECTOR_RESULTS_COUNT,
+          result.points.length
+        );
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapCount(
+    original: Function,
+    instance: any,
+    collectionName: string,
+    params?: any
+  ): Promise<any> {
+    const attributes = this.getCommonAttributes("count", collectionName);
+
+    if (params?.filter) {
+      attributes[VectorDBConventions.DB_VECTOR_QUERY_FILTER] =
+        JSON.stringify(params.filter);
+    }
+
+    const span = this.fiTracer.startSpan("qdrant count", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, collectionName, params)
+      );
+
+      if (result?.count !== undefined) {
+        span.setAttribute(
+          VectorDBConventions.DB_VECTOR_RESULTS_COUNT,
+          result.count
+        );
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  private async wrapGetCollection(
+    original: Function,
+    instance: any,
+    collectionName: string
+  ): Promise<any> {
+    const attributes = this.getCommonAttributes(
+      "get_collection",
+      collectionName
+    );
+
+    const span = this.fiTracer.startSpan("qdrant get_collection", {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.call(instance, collectionName)
+      );
+
+      if (result?.vectors_count !== undefined) {
+        span.setAttribute(
+          VectorDBConventions.DB_VECTOR_RESULTS_COUNT,
+          result.vectors_count
+        );
+      }
+
+      if (result?.config?.params?.vectors?.size) {
+        span.setAttribute(
+          VectorDBConventions.DB_VECTOR_INDEX_DIMENSIONS,
+          result.config.params.vectors.size
+        );
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+}
