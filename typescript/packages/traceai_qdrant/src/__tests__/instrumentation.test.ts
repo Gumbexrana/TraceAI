@@ -364,3 +364,553 @@ describe("Qdrant Instrumentation", () => {
           points: [
             { id: 1, payload: { text: "doc1" } },
             { id: 2, payload: { text: "doc2" } },
+          ],
+          next_page_offset: 2,
+        }),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            scroll: mockClient.scroll,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      const params = {
+        limit: 100,
+        with_payload: true,
+        filter: { must: [{ key: "active", match: { value: true } }] },
+      };
+
+      await mockModule.QdrantClient.prototype.scroll.call(
+        mockClient,
+        "test_collection",
+        params
+      );
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("QdrantClient.count Operation", () => {
+    it("should create span for count operation", async () => {
+      const mockClient = {
+        count: (jest.fn() as MockFn).mockResolvedValue({ count: 1500 }),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            count: mockClient.count,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      const params = {
+        filter: { must: [{ key: "category", match: { value: "active" } }] },
+        exact: true,
+      };
+
+      await mockModule.QdrantClient.prototype.count.call(
+        mockClient,
+        "test_collection",
+        params
+      );
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("QdrantClient.getCollection Operation", () => {
+    it("should create span for getCollection operation", async () => {
+      const mockClient = {
+        getCollection: (jest.fn() as MockFn).mockResolvedValue({
+          vectors_count: 10000,
+          points_count: 10000,
+          status: "green",
+          config: {
+            params: {
+              vectors: { size: 768, distance: "Cosine" },
+            },
+          },
+        }),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            getCollection: mockClient.getCollection,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      await mockModule.QdrantClient.prototype.getCollection.call(
+        mockClient,
+        "test_collection"
+      );
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("Error Handling", () => {
+    it("should record exception on search error", async () => {
+      const error = new Error("Search failed: collection not found");
+      const mockClient = {
+        search: (jest.fn() as MockFn).mockRejectedValue(error),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            search: mockClient.search,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      await expect(
+        mockModule.QdrantClient.prototype.search.call(
+          mockClient,
+          "nonexistent_collection",
+          { vector: [0.1] }
+        )
+      ).rejects.toThrow("Search failed: collection not found");
+
+      expect(mockSpan.recordException).toHaveBeenCalledWith(error);
+      expect(mockSpan.setStatus).toHaveBeenCalledWith({
+        code: 2,
+        message: "Search failed: collection not found",
+      });
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+
+    it("should record exception on upsert error", async () => {
+      const error = new Error("Upsert failed: dimension mismatch");
+      const mockClient = {
+        upsert: (jest.fn() as MockFn).mockRejectedValue(error),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            upsert: mockClient.upsert,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      await expect(
+        mockModule.QdrantClient.prototype.upsert.call(
+          mockClient,
+          "test_collection",
+          { points: [{ id: 1, vector: [0.1] }] }
+        )
+      ).rejects.toThrow("Upsert failed: dimension mismatch");
+
+      expect(mockSpan.recordException).toHaveBeenCalledWith(error);
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+});
+
+describe("Qdrant Instrumentation - Real World Scenarios", () => {
+  let instrumentation: any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.resetModules();
+
+    const { QdrantInstrumentation } = require("../instrumentation");
+
+    instrumentation = new QdrantInstrumentation({
+      instrumentationConfig: {
+        enabled: true,
+      },
+    });
+    instrumentation.enable();
+  });
+
+  afterEach(() => {
+    if (instrumentation) {
+      instrumentation.disable();
+    }
+  });
+
+  describe("Self-Hosted RAG Pipeline", () => {
+    it("should trace document ingestion workflow", async () => {
+      const mockClient = {
+        upsert: (jest.fn() as MockFn).mockResolvedValue({ status: "completed" }),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            upsert: mockClient.upsert,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Simulate document ingestion
+      const documents = [
+        { id: 1, text: "Introduction to machine learning", embedding: new Array(768).fill(0.1) },
+        { id: 2, text: "Deep learning fundamentals", embedding: new Array(768).fill(0.2) },
+        { id: 3, text: "Natural language processing basics", embedding: new Array(768).fill(0.3) },
+      ];
+
+      const params = {
+        points: documents.map(doc => ({
+          id: doc.id,
+          vector: doc.embedding,
+          payload: {
+            text: doc.text,
+            source: "textbook",
+            indexed_at: new Date().toISOString(),
+          },
+        })),
+      };
+
+      await mockModule.QdrantClient.prototype.upsert.call(
+        mockClient,
+        "knowledge_base",
+        params
+      );
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+
+    it("should trace semantic search with filters", async () => {
+      const mockClient = {
+        search: (jest.fn() as MockFn).mockResolvedValue([
+          { id: 1, score: 0.95, payload: { text: "Relevant result 1" } },
+          { id: 3, score: 0.88, payload: { text: "Relevant result 2" } },
+        ]),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            search: mockClient.search,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // RAG retrieval with metadata filtering
+      const searchParams = {
+        vector: new Array(768).fill(0).map(() => Math.random()),
+        limit: 5,
+        with_payload: true,
+        filter: {
+          must: [
+            { key: "source", match: { value: "textbook" } },
+          ],
+        },
+        score_threshold: 0.7,
+      };
+
+      const results = await mockModule.QdrantClient.prototype.search.call(
+        mockClient,
+        "knowledge_base",
+        searchParams
+      );
+
+      expect(results).toHaveLength(2);
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("E-commerce Product Search", () => {
+    it("should trace product similarity search", async () => {
+      const mockClient = {
+        search: (jest.fn() as MockFn).mockResolvedValue([
+          {
+            id: "prod_456",
+            score: 0.93,
+            payload: {
+              name: "Premium Wireless Headphones",
+              category: "electronics",
+              price: 149.99,
+              in_stock: true,
+            },
+          },
+        ]),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            search: mockClient.search,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Find similar products with complex filters
+      const searchParams = {
+        vector: new Array(512).fill(0).map(() => Math.random()),
+        limit: 20,
+        with_payload: true,
+        filter: {
+          must: [
+            { key: "in_stock", match: { value: true } },
+            { key: "category", match: { value: "electronics" } },
+          ],
+          should: [
+            { key: "price", range: { lte: 200 } },
+          ],
+        },
+      };
+
+      await mockModule.QdrantClient.prototype.search.call(
+        mockClient,
+        "products",
+        searchParams
+      );
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+
+    it("should trace product catalog pagination", async () => {
+      const mockClient = {
+        scroll: (jest.fn() as MockFn).mockResolvedValue({
+          points: Array.from({ length: 100 }, (_, i) => ({
+            id: `prod_${i}`,
+            payload: { name: `Product ${i}`, category: "electronics" },
+          })),
+          next_page_offset: "prod_100",
+        }),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            scroll: mockClient.scroll,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Paginate through products
+      const scrollParams = {
+        limit: 100,
+        with_payload: true,
+        filter: {
+          must: [{ key: "category", match: { value: "electronics" } }],
+        },
+      };
+
+      const result = await mockModule.QdrantClient.prototype.scroll.call(
+        mockClient,
+        "products",
+        scrollParams
+      );
+
+      expect(result.points).toHaveLength(100);
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("Image Similarity Search", () => {
+    it("should trace image embedding search", async () => {
+      const mockClient = {
+        search: (jest.fn() as MockFn).mockResolvedValue([
+          { id: "img_001", score: 0.97, payload: { url: "https://example.com/1.jpg", tags: ["nature", "sunset"] } },
+          { id: "img_002", score: 0.92, payload: { url: "https://example.com/2.jpg", tags: ["nature", "mountain"] } },
+        ]),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            search: mockClient.search,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // CLIP-based image search
+      const imageEmbedding = new Array(512).fill(0).map(() => Math.random());
+
+      const searchParams = {
+        vector: imageEmbedding,
+        limit: 10,
+        with_payload: true,
+        filter: {
+          must: [
+            { key: "tags", match: { any: ["nature"] } },
+          ],
+        },
+      };
+
+      await mockModule.QdrantClient.prototype.search.call(
+        mockClient,
+        "images",
+        searchParams
+      );
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("Collection Management", () => {
+    it("should trace collection statistics retrieval", async () => {
+      const mockClient = {
+        getCollection: (jest.fn() as MockFn).mockResolvedValue({
+          vectors_count: 1000000,
+          points_count: 1000000,
+          indexed_vectors_count: 1000000,
+          status: "green",
+          optimizer_status: "ok",
+          config: {
+            params: {
+              vectors: { size: 768, distance: "Cosine" },
+              shard_number: 4,
+              replication_factor: 2,
+            },
+          },
+        }),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            getCollection: mockClient.getCollection,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      const collectionInfo = await mockModule.QdrantClient.prototype.getCollection.call(
+        mockClient,
+        "production_collection"
+      );
+
+      expect(collectionInfo.vectors_count).toBe(1000000);
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+
+    it("should trace filtered count operations", async () => {
+      const mockClient = {
+        count: (jest.fn() as MockFn).mockResolvedValue({ count: 45000 }),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            count: mockClient.count,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Count active documents
+      const countParams = {
+        filter: {
+          must: [
+            { key: "status", match: { value: "active" } },
+            { key: "created_at", range: { gte: "2024-01-01" } },
+          ],
+        },
+        exact: true,
+      };
+
+      const result = await mockModule.QdrantClient.prototype.count.call(
+        mockClient,
+        "documents",
+        countParams
+      );
+
+      expect(result.count).toBe(45000);
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("Batch Operations", () => {
+    it("should trace large batch upsert", async () => {
+      const mockClient = {
+        upsert: (jest.fn() as MockFn).mockResolvedValue({ status: "completed" }),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            upsert: mockClient.upsert,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Large batch upsert
+      const batchSize = 1000;
+      const points = Array.from({ length: batchSize }, (_, i) => ({
+        id: i,
+        vector: new Array(768).fill(0).map(() => Math.random()),
+        payload: {
+          text: `Document ${i}`,
+          batch_id: "batch_001",
+          indexed_at: new Date().toISOString(),
+        },
+      }));
+
+      await mockModule.QdrantClient.prototype.upsert.call(
+        mockClient,
+        "documents",
+        { points }
+      );
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+
+    it("should trace batch deletion", async () => {
+      const mockClient = {
+        delete: (jest.fn() as MockFn).mockResolvedValue({ status: "completed" }),
+      };
+
+      const mockModule = {
+        QdrantClient: {
+          prototype: {
+            delete: mockClient.delete,
+          },
+        },
+      };
+
+      instrumentation.manuallyInstrument(mockModule);
+
+      // Delete by filter
+      const deleteParams = {
+        filter: {
+          must: [
+            { key: "status", match: { value: "deleted" } },
+          ],
+        },
+      };
+
+      await mockModule.QdrantClient.prototype.delete.call(
+        mockClient,
+        "documents",
+        deleteParams
+      );
+
+      expect(mockSpan.end).toHaveBeenCalled();
+    });
+  });
+});
