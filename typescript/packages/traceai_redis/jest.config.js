@@ -7,3 +7,18 @@ module.exports = {
     '**/?(*.)+(spec|test).ts'
   ],
   collectCoverageFrom: [
+    'src/**/*.ts',
+    '!src/**/*.d.ts',
+    '!src/index.ts'
+  ],
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'lcov'],
+  transform: {
+    '^.+\\.ts$': 'ts-jest'
+  },
+  moduleNameMapper: {
+    '^@traceai/fi-core$': '<rootDir>/../fi-core/src',
+    '^@traceai/fi-semantic-conventions$': '<rootDir>/../fi-semantic-conventions/src'
+  },
+  testTimeout: 10000
+};
