@@ -122,3 +122,57 @@ describe("Strands Agent Tracing", () => {
     instrumentation.manuallyInstrument(mockModule);
 
     const agent = new mockModule.Agent();
+    const result = await agent.invoke("Hello");
+
+    expect(result.text).toBe("Response to: Hello");
+
+    // Check spans were created
+    const spans = memoryExporter.getFinishedSpans();
+    expect(spans.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("should capture model provider from model name", async () => {
+    class MockAgent {
+      name = "ClaudeAgent";
+      model = "us.anthropic.claude-sonnet-4-20250514-v1:0";
+
+      async invoke(input: string) {
+        return { text: `Response: ${input}` };
+      }
+    }
+
+    const mockModule = { Agent: MockAgent };
+    instrumentation.manuallyInstrument(mockModule);
+
+    const agent = new mockModule.Agent();
+    await agent.invoke("Hello");
+
+    const spans = memoryExporter.getFinishedSpans();
+    expect(spans.length).toBeGreaterThanOrEqual(1);
+    // Model name should be captured
+    const span = spans[0];
+    expect(span.attributes["gen_ai.request.model"]).toBe("us.anthropic.claude-sonnet-4-20250514-v1:0");
+  });
+
+  it("should handle errors gracefully", async () => {
+    class MockAgent {
+      name = "FailingAgent";
+      model = "test-model";
+
+      async invoke(_input: string) {
+        throw new Error("Agent failed");
+      }
+    }
+
+    const mockModule = { Agent: MockAgent };
+    instrumentation.manuallyInstrument(mockModule);
+
+    const agent = new mockModule.Agent();
+
+    await expect(agent.invoke("Hello")).rejects.toThrow("Agent failed");
+
+    const spans = memoryExporter.getFinishedSpans();
+    expect(spans.length).toBeGreaterThanOrEqual(1);
+    expect(spans[0].status.code).toBe(2); // SpanStatusCode.ERROR
+  });
+});
