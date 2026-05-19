@@ -49,3 +49,25 @@ describeE2E("Strands E2E Tests", () => {
       const agent = new Agent({
         systemPrompt: "You are a helpful assistant. Answer briefly.",
       });
+
+      const response = await (agent as any).invoke("What is 2 + 2? Answer with just the number.");
+      expect(response).toBeDefined();
+    }, 60000);
+  });
+
+  describe("Error Handling", () => {
+    it("should handle agent errors gracefully", async () => {
+      const strandsModule = await import("@strands-agents/sdk");
+      const Agent = (strandsModule as any).Agent;
+
+      const agent = new Agent({
+        systemPrompt: "You are a test agent.",
+        model: "non-existent-model-12345",
+      });
+
+      await expect(
+        (agent as any).invoke("Hello")
+      ).rejects.toThrow();
+    }, 30000);
+  });
+});
