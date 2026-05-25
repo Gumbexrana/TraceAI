@@ -113,3 +113,53 @@ const instrumentation = new TogetherInstrumentation({
   },
   traceConfig: {
     hideInputs: false,  // Hide input content in traces
+    hideOutputs: false, // Hide output content in traces
+  },
+});
+```
+
+## Streaming Support
+
+The instrumentation fully supports streaming responses. When using streaming, the complete response is captured after the stream is consumed:
+
+```typescript
+const stream = await client.chat.completions.create({
+  model: "meta-llama/Llama-3-8b-chat-hf",
+  messages: [{ role: "user", content: "Hello!" }],
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  // Process chunks as they arrive
+  console.log(chunk.choices[0]?.delta?.content);
+}
+// Span is ended with full content captured
+```
+
+## Supported Models
+
+Together AI supports a wide variety of models. Some popular ones include:
+
+**Chat Models:**
+- `meta-llama/Llama-3-8b-chat-hf`
+- `meta-llama/Llama-3-70b-chat-hf`
+- `mistralai/Mixtral-8x7B-Instruct-v0.1`
+- `togethercomputer/llama-2-70b-chat`
+
+**Text Completion Models:**
+- `togethercomputer/RedPajama-INCITE-7B-Base`
+- `togethercomputer/GPT-JT-6B-v1`
+
+**Embedding Models:**
+- `togethercomputer/m2-bert-80M-8k-retrieval`
+- `BAAI/bge-large-en-v1.5`
+
+See the [Together AI models page](https://api.together.xyz/models) for a complete list.
+
+## Examples
+
+See the [examples](./examples) directory for complete working examples.
+
+## License
+
+Apache 2.0
