@@ -289,3 +289,440 @@ export class TogetherInstrumentation extends InstrumentationBase {
 
     _isFIPatched = true;
     try {
+      module.fiPatched = true;
+    } catch (e) {
+      diag.warn(`Failed to set fiPatched flag on module '${MODULE_NAME}'. Error: ${e}`);
+    }
+
+    return module;
+  }
+
+  /**
+   * Creates a wrapper for chat.completions.create
+   */
+  private createChatCompletionWrapper(instrumentation: TogetherInstrumentation) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (original: any): any => {
+      return function patchedChatCreate(
+        this: unknown,
+        body: TogetherChatCompletionRequest,
+        options?: Record<string, unknown>,
+      ) {
+        const { messages: _messages, ...invocationParameters } = body;
+
+        const span = instrumentation.fiTracer.startSpan(
+          `Together Chat Completions`,
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              [SemanticConventions.FI_SPAN_KIND]: FISpanKind.LLM,
+              [SemanticConventions.LLM_MODEL_NAME]: body.model,
+              [SemanticConventions.INPUT_VALUE]: JSON.stringify(body),
+              [SemanticConventions.INPUT_MIME_TYPE]: MimeType.JSON,
+              [SemanticConventions.LLM_INVOCATION_PARAMETERS]:
+                JSON.stringify(invocationParameters),
+              [SemanticConventions.LLM_PROVIDER]: LLMProvider.TOGETHER,
+              [SemanticConventions.GEN_AI_OPERATION_NAME]: "chat",
+              ...getChatInputMessagesAttributes(body),
+              ...getToolsJSONSchema(body),
+              [SemanticConventions.RAW_INPUT]: safelyJSONStringify(body) ?? "",
+            },
+          },
+        );
+
+        const execContext = getExecContext(span);
+        const execPromise = safeExecuteInTheMiddle(
+          () => {
+            return context.with(trace.setSpan(execContext, span), () => {
+              return original.apply(this, [body, options]);
+            });
+          },
+          (error) => {
+            if (error) {
+              span.recordException(error);
+              span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+              span.end();
+            }
+          },
+        );
+
+        const wrappedPromise = (execPromise as Promise<TogetherChatCompletion | TogetherStream<TogetherChatCompletion>>).then((result) => {
+          if (isChatCompletionResponse(result)) {
+            span.setAttributes({
+              [SemanticConventions.OUTPUT_VALUE]: JSON.stringify(result),
+              [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.JSON,
+              [SemanticConventions.LLM_MODEL_NAME]: result.model,
+              [SemanticConventions.GEN_AI_RESPONSE_MODEL]: result.model,
+              [SemanticConventions.GEN_AI_RESPONSE_ID]: result.id,
+              [SemanticConventions.GEN_AI_RESPONSE_FINISH_REASONS]: safelyJSONStringify(result.choices.map(c => c.finish_reason)) ?? "[]",
+              ...getChatOutputMessagesAttributes(result),
+              ...getUsageAttributes(result),
+              [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(result) ?? "",
+            });
+            span.setStatus({ code: SpanStatusCode.OK });
+            span.end();
+          } else if (isStreamResponse(result)) {
+            return wrapChatStream(result, span);
+          }
+          return result;
+        }).catch((error: Error) => {
+          span.recordException(error);
+          span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+          span.end();
+          throw error;
+        });
+
+        return context.bind(execContext, wrappedPromise) as Promise<TogetherChatCompletion | TogetherStream<TogetherChatCompletion>>;
+      };
+    };
+  }
+
+  /**
+   * Creates a wrapper for completions.create
+   */
+  private createCompletionWrapper(instrumentation: TogetherInstrumentation) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (original: any): any => {
+      return function patchedCompletionCreate(
+        this: unknown,
+        body: TogetherCompletionRequest,
+        options?: Record<string, unknown>,
+      ) {
+        const { prompt: _prompt, ...invocationParameters } = body;
+
+        const span = instrumentation.fiTracer.startSpan(
+          `Together Completions`,
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              [SemanticConventions.FI_SPAN_KIND]: FISpanKind.LLM,
+              [SemanticConventions.LLM_MODEL_NAME]: body.model,
+              [SemanticConventions.INPUT_VALUE]: JSON.stringify(body),
+              [SemanticConventions.INPUT_MIME_TYPE]: MimeType.JSON,
+              [SemanticConventions.LLM_INVOCATION_PARAMETERS]:
+                JSON.stringify(invocationParameters),
+              [SemanticConventions.LLM_PROVIDER]: LLMProvider.TOGETHER,
+              [SemanticConventions.GEN_AI_OPERATION_NAME]: "text_completion",
+              [`${SemanticConventions.LLM_PROMPTS}.0`]: body.prompt,
+              [SemanticConventions.RAW_INPUT]: safelyJSONStringify(body) ?? "",
+            },
+          },
+        );
+
+        const execContext = getExecContext(span);
+        const execPromise = safeExecuteInTheMiddle(
+          () => {
+            return context.with(trace.setSpan(execContext, span), () => {
+              return original.apply(this, [body, options]);
+            });
+          },
+          (error) => {
+            if (error) {
+              span.recordException(error);
+              span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+              span.end();
+            }
+          },
+        );
+
+        const wrappedPromise = (execPromise as Promise<TogetherCompletion>).then((result) => {
+          span.setAttributes({
+            [SemanticConventions.OUTPUT_VALUE]: result.choices[0]?.text ?? "",
+            [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.TEXT,
+            [SemanticConventions.LLM_MODEL_NAME]: result.model,
+            ...getCompletionUsageAttributes(result),
+            [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(result) ?? "",
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+          span.end();
+          return result;
+        }).catch((error: Error) => {
+          span.recordException(error);
+          span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+          span.end();
+          throw error;
+        });
+
+        return context.bind(execContext, wrappedPromise) as Promise<TogetherCompletion>;
+      };
+    };
+  }
+
+  /**
+   * Creates a wrapper for embeddings.create
+   */
+  private createEmbeddingWrapper(instrumentation: TogetherInstrumentation) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (original: any): any => {
+      return function patchedEmbeddingCreate(
+        this: unknown,
+        body: TogetherEmbeddingRequest,
+        options?: Record<string, unknown>,
+      ) {
+        const inputTexts = Array.isArray(body.input) ? body.input : [body.input];
+
+        const span = instrumentation.fiTracer.startSpan(
+          `Together Embeddings`,
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              [SemanticConventions.FI_SPAN_KIND]: FISpanKind.EMBEDDING,
+              [SemanticConventions.EMBEDDING_MODEL_NAME]: body.model,
+              [SemanticConventions.INPUT_VALUE]: JSON.stringify(body),
+              [SemanticConventions.INPUT_MIME_TYPE]: MimeType.JSON,
+              [SemanticConventions.LLM_PROVIDER]: LLMProvider.TOGETHER,
+              [SemanticConventions.GEN_AI_OPERATION_NAME]: "embeddings",
+              ...getEmbeddingInputAttributes(inputTexts),
+              [SemanticConventions.RAW_INPUT]: safelyJSONStringify(body) ?? "",
+            },
+          },
+        );
+
+        const execContext = getExecContext(span);
+        const execPromise = safeExecuteInTheMiddle(
+          () => {
+            return context.with(trace.setSpan(execContext, span), () => {
+              return original.apply(this, [body, options]);
+            });
+          },
+          (error) => {
+            if (error) {
+              span.recordException(error);
+              span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+              span.end();
+            }
+          },
+        );
+
+        const wrappedPromise = (execPromise as Promise<TogetherEmbeddingResponse>).then((result) => {
+          span.setAttributes({
+            [SemanticConventions.OUTPUT_VALUE]: JSON.stringify(result),
+            [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.JSON,
+            [SemanticConventions.EMBEDDING_MODEL_NAME]: result.model,
+            ...getEmbeddingOutputAttributes(result),
+            [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(result) ?? "",
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+          span.end();
+          return result;
+        }).catch((error: Error) => {
+          span.recordException(error);
+          span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+          span.end();
+          throw error;
+        });
+
+        return context.bind(execContext, wrappedPromise) as Promise<TogetherEmbeddingResponse>;
+      };
+    };
+  }
+
+  /**
+   * Un-patches the Together module
+   */
+  private unpatch(
+    moduleExports: Record<string, unknown> & { fiPatched?: boolean },
+    moduleVersion?: string,
+  ) {
+    const Together = moduleExports.Together as {
+      prototype: {
+        chat?: { completions?: Record<string, unknown> };
+        completions?: Record<string, unknown>;
+        embeddings?: Record<string, unknown>;
+      };
+    } | undefined;
+
+    if (Together?.prototype) {
+      if (Together.prototype.chat?.completions) {
+        this._unwrap(Together.prototype.chat.completions, "create");
+      }
+      if (Together.prototype.completions) {
+        this._unwrap(Together.prototype.completions, "create");
+      }
+      if (Together.prototype.embeddings) {
+        this._unwrap(Together.prototype.embeddings, "create");
+      }
+    }
+
+    _isFIPatched = false;
+    try {
+      moduleExports.fiPatched = false;
+    } catch (e) {
+      diag.warn(`Failed to unset fiPatched flag on module '${MODULE_NAME}'. Error: ${e}`);
+    }
+  }
+}
+
+/**
+ * Type guard for chat completion response
+ */
+function isChatCompletionResponse(
+  response: TogetherChatCompletion | TogetherStream<TogetherChatCompletion>,
+): response is TogetherChatCompletion {
+  return "choices" in response && Array.isArray((response as TogetherChatCompletion).choices);
+}
+
+/**
+ * Type guard for stream response
+ */
+function isStreamResponse<T>(
+  response: T | TogetherStream<T>,
+): response is TogetherStream<T> {
+  return typeof (response as TogetherStream<T>)[Symbol.asyncIterator] === "function";
+}
+
+/**
+ * Wraps a chat stream to capture the full response
+ */
+async function* wrapChatStream(
+  stream: TogetherStream<TogetherChatCompletion>,
+  span: Span,
+): AsyncGenerator<TogetherChatCompletion, void, unknown> {
+  let fullContent = "";
+  const allChunks: TogetherChatCompletion[] = [];
+  let lastChunk: TogetherChatCompletion | null = null;
+
+  try {
+    for await (const chunk of stream) {
+      allChunks.push(chunk);
+      const choice = chunk.choices?.[0];
+      if (choice?.delta?.content) {
+        fullContent += choice.delta.content;
+      }
+      lastChunk = chunk;
+      yield chunk;
+    }
+  } catch (error) {
+    span.recordException(error as Error);
+    span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+    span.end();
+    throw error;
+  }
+
+  const msg: Record<string, unknown> = { role: "assistant", content: fullContent };
+  const attributes: Attributes = {
+    [SemanticConventions.OUTPUT_VALUE]: fullContent,
+    [SemanticConventions.OUTPUT_MIME_TYPE]: MimeType.TEXT,
+    [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify([msg]) ?? "[]",
+    [SemanticConventions.RAW_OUTPUT]: safelyJSONStringify(allChunks) ?? "",
+  };
+
+  if (lastChunk) {
+    attributes[SemanticConventions.LLM_MODEL_NAME] = lastChunk.model;
+    if (lastChunk.usage) {
+      attributes[SemanticConventions.LLM_TOKEN_COUNT_PROMPT] = lastChunk.usage.prompt_tokens;
+      attributes[SemanticConventions.LLM_TOKEN_COUNT_COMPLETION] = lastChunk.usage.completion_tokens;
+      attributes[SemanticConventions.LLM_TOKEN_COUNT_TOTAL] = lastChunk.usage.total_tokens;
+    }
+  }
+
+  span.setAttributes(attributes);
+  span.setStatus({ code: SpanStatusCode.OK });
+  span.end();
+}
+
+/**
+ * Gets input message attributes for chat requests
+ */
+function getChatInputMessagesAttributes(request: TogetherChatCompletionRequest): Attributes {
+  const serialized = request.messages.map((message) => {
+    const obj: Record<string, unknown> = { role: message.role };
+    if (message.content) {
+      obj.content = message.content;
+    }
+    if (message.tool_call_id) {
+      obj.tool_call_id = message.tool_call_id;
+    }
+    return obj;
+  });
+  return { [SemanticConventions.LLM_INPUT_MESSAGES]: safelyJSONStringify(serialized) ?? "[]" };
+}
+
+/**
+ * Gets tool schema attributes
+ */
+function getToolsJSONSchema(request: TogetherChatCompletionRequest): Attributes {
+  if (!request.tools) {
+    return {};
+  }
+  return { [SemanticConventions.LLM_TOOLS]: safelyJSONStringify(request.tools) ?? "[]" };
+}
+
+/**
+ * Gets output message attributes from chat response
+ */
+function getChatOutputMessagesAttributes(response: TogetherChatCompletion): Attributes {
+  const choice = response.choices[0];
+  if (!choice) {
+    return {};
+  }
+
+  const msg: Record<string, unknown> = { role: choice.message.role };
+  if (choice.message.content) {
+    msg.content = choice.message.content;
+  }
+  if (choice.message.tool_calls) {
+    msg.tool_calls = choice.message.tool_calls.map((tc) => ({
+      id: tc.id,
+      function: { name: tc.function.name, arguments: tc.function.arguments },
+    }));
+  }
+  return { [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify([msg]) ?? "[]" };
+}
+
+/**
+ * Gets usage attributes from chat response
+ */
+function getUsageAttributes(response: TogetherChatCompletion): Attributes {
+  if (response.usage) {
+    return {
+      [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]: response.usage.completion_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]: response.usage.prompt_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]: response.usage.total_tokens,
+    };
+  }
+  return {};
+}
+
+/**
+ * Gets usage attributes from completion response
+ */
+function getCompletionUsageAttributes(response: TogetherCompletion): Attributes {
+  if (response.usage) {
+    return {
+      [SemanticConventions.LLM_TOKEN_COUNT_COMPLETION]: response.usage.completion_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_PROMPT]: response.usage.prompt_tokens,
+      [SemanticConventions.LLM_TOKEN_COUNT_TOTAL]: response.usage.total_tokens,
+    };
+  }
+  return {};
+}
+
+/**
+ * Gets embedding input attributes
+ */
+function getEmbeddingInputAttributes(texts: string[]): Attributes {
+  return texts.reduce((acc: Attributes, text, index) => {
+    acc[`${SemanticConventions.EMBEDDING_EMBEDDINGS}.${index}.${SemanticConventions.EMBEDDING_TEXT}`] = text;
+    return acc;
+  }, {});
+}
+
+/**
+ * Gets embedding output attributes
+ */
+function getEmbeddingOutputAttributes(response: TogetherEmbeddingResponse): Attributes {
+  const attributes: Attributes = {};
+
+  response.data.forEach((item, index) => {
+    attributes[`${SemanticConventions.EMBEDDING_EMBEDDINGS}.${index}.${SemanticConventions.EMBEDDING_VECTOR}`] =
+      JSON.stringify(item.embedding);
+  });
+
+  if (response.usage) {
+    attributes[SemanticConventions.LLM_TOKEN_COUNT_PROMPT] = response.usage.prompt_tokens;
+    attributes[SemanticConventions.LLM_TOKEN_COUNT_TOTAL] = response.usage.total_tokens;
+  }
+
+  return attributes;
+}
