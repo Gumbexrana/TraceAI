@@ -20,3 +20,13 @@ function withSafety<T extends GenericFunction>({
       if (onError) {
         onError(error);
       }
+      return null;
+    }
+  };
+}
+
+const safelyJSONStringify = withSafety({ fn: JSON.stringify });
+
+const safelyJSONParse = withSafety({ fn: JSON.parse });
+
+export { withSafety, safelyJSONStringify, safelyJSONParse };
