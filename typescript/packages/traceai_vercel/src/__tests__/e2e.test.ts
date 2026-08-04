@@ -90,3 +90,43 @@ describeE2E("Vercel AI SDK E2E Tests", () => {
       });
 
       const chunks: string[] = [];
+      for await (const textPart of result.textStream) {
+        chunks.push(textPart);
+      }
+
+      expect(chunks.length).toBeGreaterThan(0);
+      expect(chunks.join("").length).toBeGreaterThan(0);
+    }, 30000);
+  });
+
+  describe("SpanProcessor", () => {
+    it("should export isFISpan utility", () => {
+      expect(typeof isFISpan).toBe("function");
+    });
+
+    it("should create FISimpleSpanProcessor instance", () => {
+      const exporter = new InMemorySpanExporter();
+      const processor = new FISimpleSpanProcessor({ exporter });
+      expect(processor).toBeDefined();
+    });
+  });
+
+  describe("Error Handling", () => {
+    it("should handle invalid model gracefully", async () => {
+      const { generateText } = await import("ai");
+      const { createOpenAI } = await import("@ai-sdk/openai");
+
+      const openai = createOpenAI({
+        baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        apiKey: GOOGLE_API_KEY!,
+      });
+
+      await expect(
+        generateText({
+          model: openai.chat("non-existent-model-12345"),
+          prompt: "Hello",
+        })
+      ).rejects.toThrow();
+    }, 30000);
+  });
+});
