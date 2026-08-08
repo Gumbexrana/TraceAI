@@ -1,0 +1,51 @@
+{
+  "name": "@traceai/fi-instrumentation-vertexai",
+  "version": "0.1.0",
+  "description": "OpenTelemetry instrumentation for Google Cloud Vertex AI SDK",
+  "main": "dist/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && tsc -p tsconfig.esm.json",
+    "build:watch": "tsc -w",
+    "clean": "rimraf dist",
+    "lint": "eslint src --ext .ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "opentelemetry",
+    "tracing",
+    "instrumentation",
+    "vertex-ai",
+    "google-cloud",
+    "gemini",
+    "llm",
+    "ai",
+    "observability"
+  ],
+  "author": "FutureAGI",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/futureagi/traceai.git",
+    "directory": "typescript/packages/traceai_vertexai"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.7.0",
+    "@opentelemetry/instrumentation": "^0.46.0",
+    "@traceai/fi-core": "workspace:^",
+    "@traceai/fi-semantic-conventions": "workspace:^"
+  },
