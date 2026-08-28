@@ -71,3 +71,35 @@ async function main() {
   // Generate with streaming - will be traced
   const streamResult = await model.generateContentStream({
     contents: [
+      {
+        role: "user",
+        parts: [{ text: "Write a short poem about AI." }],
+      },
+    ],
+  });
+
+  console.log("Streaming response:");
+  for await (const chunk of streamResult.stream) {
+    const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (text) {
+      process.stdout.write(text);
+    }
+  }
+  console.log("\n");
+
+  // Start a chat session - messages will be traced
+  const chat = model.startChat();
+  const chatResponse = await chat.sendMessage("Hello! How are you?");
+  console.log("Chat response:", chatResponse.response.candidates?.[0]?.content?.parts?.[0]?.text);
+
+  // Count tokens - will be traced
+  const tokenCount = await model.countTokens({
+    contents: [{ role: "user", parts: [{ text: "Hello world" }] }],
+  });
+  console.log("Token count:", tokenCount.totalTokens);
+  */
+
+  console.log("Instrumentation is active and ready to trace Vertex AI calls.");
+}
+
+main().catch(console.error);
