@@ -444,3 +444,195 @@ export class VertexAIInstrumentation extends InstrumentationBase {
       if (result?.embeddings) {
         span.setAttribute("vertexai.embedding_count", result.embeddings.length);
         if (result.embeddings[0]?.values) {
+          span.setAttribute("vertexai.embedding_dimensions", result.embeddings[0].values.length);
+        }
+      }
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.end();
+
+      return result;
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (error as Error).message,
+      });
+      span.end();
+      throw error;
+    }
+  }
+
+  private getInputMessagesAttributes(request: any): Record<string, string> {
+    const contents = request.contents || [];
+    if (!Array.isArray(contents) || contents.length === 0) {
+      return {};
+    }
+    const messages = contents.map((content: any) => {
+      const msg: Record<string, unknown> = { role: content.role || "user" };
+      if (content.parts) {
+        const textParts = content.parts
+          .filter((p: any) => p.text)
+          .map((p: any) => p.text)
+          .join("");
+        if (textParts) {
+          msg.content = textParts;
+        }
+      }
+      return msg;
+    });
+    return {
+      [SemanticConventions.LLM_INPUT_MESSAGES]: safelyJSONStringify(messages) ?? "[]",
+    };
+  }
+
+  private setResponseAttributes(span: Span, result: any): void {
+    if (!result) return;
+
+    const response = result.response || result;
+
+    if (response.candidates?.[0]?.content) {
+      const content = response.candidates[0].content;
+      const msg: Record<string, unknown> = { role: content.role || "model" };
+
+      if (content.parts) {
+        const textParts = content.parts
+          .filter((p: any) => p.text)
+          .map((p: any) => p.text)
+          .join("");
+        if (textParts) {
+          msg.content = textParts;
+          span.setAttribute(SemanticConventions.OUTPUT_VALUE, textParts);
+        }
+      }
+
+      span.setAttribute(
+        SemanticConventions.LLM_OUTPUT_MESSAGES,
+        safelyJSONStringify([msg]) ?? "[]"
+      );
+
+      // Add finish reasons
+      const finishReasons = response.candidates
+        ?.map((c: any) => c.finishReason)
+        .filter(Boolean);
+      if (finishReasons?.length) {
+        span.setAttribute(
+          SemanticConventions.GEN_AI_RESPONSE_FINISH_REASONS,
+          safelyJSONStringify(finishReasons) ?? "[]"
+        );
+      }
+    }
+
+    if (response.usageMetadata) {
+      const usage = response.usageMetadata;
+      if (usage.promptTokenCount) {
+        span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_PROMPT, usage.promptTokenCount);
+      }
+      if (usage.candidatesTokenCount) {
+        span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_COMPLETION, usage.candidatesTokenCount);
+      }
+      if (usage.totalTokenCount) {
+        span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_TOTAL, usage.totalTokenCount);
+      }
+    }
+
+    span.setAttribute(SemanticConventions.RAW_OUTPUT, safeJsonStringify(response));
+  }
+
+  private async wrapStream(streamResult: any, span: Span): Promise<any> {
+    const chunks: any[] = [];
+    let fullContent = "";
+
+    // Vertex AI streams return a response object with a stream property
+    const originalStream = streamResult.stream;
+
+    if (!originalStream || typeof originalStream[Symbol.asyncIterator] !== "function") {
+      // If not a proper stream, just return as-is
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.end();
+      return streamResult;
+    }
+
+    const wrappedStream = async function* () {
+      try {
+        for await (const chunk of originalStream) {
+          chunks.push(chunk);
+          if (chunk.candidates?.[0]?.content?.parts) {
+            const textParts = chunk.candidates[0].content.parts
+              .filter((p: any) => p.text)
+              .map((p: any) => p.text)
+              .join("");
+            fullContent += textParts;
+          }
+          yield chunk;
+        }
+
+        span.setAttributes({
+          [SemanticConventions.OUTPUT_VALUE]: fullContent,
+          [SemanticConventions.LLM_OUTPUT_MESSAGES]: safelyJSONStringify([{ role: "model", content: fullContent }]) ?? "[]",
+          [SemanticConventions.RAW_OUTPUT]: safeJsonStringify(chunks),
+        });
+
+        // Get usage from the aggregated response if available
+        if (streamResult.response) {
+          const response = await streamResult.response;
+          if (response?.usageMetadata) {
+            const usage = response.usageMetadata;
+            if (usage.promptTokenCount) {
+              span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_PROMPT, usage.promptTokenCount);
+            }
+            if (usage.candidatesTokenCount) {
+              span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_COMPLETION, usage.candidatesTokenCount);
+            }
+            if (usage.totalTokenCount) {
+              span.setAttribute(SemanticConventions.LLM_TOKEN_COUNT_TOTAL, usage.totalTokenCount);
+            }
+          }
+        }
+
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: (error as Error).message,
+        });
+        throw error;
+      } finally {
+        span.end();
+      }
+    };
+
+    return {
+      ...streamResult,
+      stream: wrappedStream(),
+    };
+  }
+}
+
+// Global patched flag
+let _isFIPatched = false;
+
+/**
+ * Check if the module has been patched.
+ */
+export function isPatched(): boolean {
+  return _isFIPatched;
+}
+
+/**
+ * Reset the patched state (for testing only).
+ */
+export function _resetPatchedStateForTesting(): void {
+  _isFIPatched = false;
+}
+
+// Helper functions
+
+function safeJsonStringify(obj: unknown): string {
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    return String(obj);
+  }
+}
