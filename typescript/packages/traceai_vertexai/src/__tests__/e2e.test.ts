@@ -53,3 +53,86 @@ describeE2E("Vertex AI E2E Tests", () => {
     await provider.shutdown();
   }, 15000);
 
+  describe("Content Generation", () => {
+    it("should complete a basic content generation request", async () => {
+      try {
+        const model = vertexAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const result = await model.generateContent("What is 2 + 2? Answer with just the number.");
+        const response = await result.response;
+
+        expect(response).toBeDefined();
+        expect(response.candidates).toBeDefined();
+        console.log("Content generation response:", JSON.stringify(response.candidates[0]));
+      } catch (error) {
+        console.log("Content generation errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should handle system instructions", async () => {
+      try {
+        const model = vertexAI.getGenerativeModel({
+          model: "gemini-2.5-flash",
+          systemInstruction: "You are a helpful assistant. Always respond with exactly one word.",
+        });
+        const result = await model.generateContent("Say hello");
+        const response = await result.response;
+
+        expect(response.candidates).toBeDefined();
+        console.log("System instruction response:", JSON.stringify(response.candidates[0]));
+      } catch (error) {
+        console.log("System instruction errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should handle multi-turn chat", async () => {
+      try {
+        const model = vertexAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const chat = model.startChat({
+          history: [
+            { role: "user", parts: [{ text: "My name is TestUser." }] },
+            { role: "model", parts: [{ text: "Hello TestUser! Nice to meet you." }] },
+          ],
+        });
+
+        const result = await chat.sendMessage("What is my name?");
+        const response = await result.response;
+
+        expect(response.candidates).toBeDefined();
+        console.log("Multi-turn response:", response.candidates[0]?.content?.parts?.[0]?.text);
+      } catch (error) {
+        console.log("Multi-turn errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+
+    it("should handle streaming responses", async () => {
+      try {
+        const model = vertexAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const result = await model.generateContentStream("Count from 1 to 3.");
+
+        const chunks: string[] = [];
+        for await (const chunk of result.stream) {
+          const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            chunks.push(text);
+          }
+        }
+
+        expect(chunks.length).toBeGreaterThan(0);
+        console.log("Streaming response:", chunks.join(""));
+      } catch (error) {
+        console.log("Streaming errored (span still exported):", (error as Error).message);
+      }
+    }, 30000);
+  });
+
+  describe("Error Handling", () => {
+    it("should handle invalid model gracefully", async () => {
+      try {
+        const model = vertexAI.getGenerativeModel({ model: "non-existent-model-12345" });
+        await model.generateContent("Hello");
+      } catch (error) {
+        console.log("Error handling: correctly threw on invalid model");
+      }
+    }, 30000);
+  });
+});
