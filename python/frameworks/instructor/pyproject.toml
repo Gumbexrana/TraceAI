@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "traceAI-instructor"
+version = "0.2.0"
+description = "OpenTelemetry instrumentation for Instructor"
+authors = ["Future AGI <no-reply@futureagi.com>"]
+readme = "README.md"
+
+packages = [
+    { include = "traceai_instructor" },
+]
+
+[tool.poetry.dependencies]
+python = ">3.9, <3.14"
+fi-instrumentation-otel = ">=0.1.11"
+instructor = ">=1.0.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
