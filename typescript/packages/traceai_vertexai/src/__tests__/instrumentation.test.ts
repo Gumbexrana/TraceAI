@@ -119,3 +119,186 @@ describe("GenerativeModel Patching", () => {
   beforeEach(() => {
     memoryExporter.reset();
     _resetPatchedStateForTesting();
+  });
+
+  it("should wrap GenerativeModel.generateContent when available", () => {
+    const inst = new VertexAIInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const originalGenerate = jest.fn().mockResolvedValue({
+      response: {
+        candidates: [{ content: { role: "model", parts: [{ text: "Hello!" }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 },
+      },
+    });
+
+    const mockModule = {
+      GenerativeModel: {
+        prototype: {
+          generateContent: originalGenerate,
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+
+  it("should wrap GenerativeModel.generateContentStream when available", () => {
+    const inst = new VertexAIInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const originalStream = jest.fn().mockResolvedValue({
+      stream: (async function* () {
+        yield { candidates: [{ content: { parts: [{ text: "Hello" }] } }] };
+      })(),
+      response: Promise.resolve({}),
+    });
+
+    const mockModule = {
+      GenerativeModel: {
+        prototype: {
+          generateContentStream: originalStream,
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+
+  it("should wrap GenerativeModel.countTokens when available", () => {
+    const inst = new VertexAIInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const originalCount = jest.fn().mockResolvedValue({ totalTokens: 100 });
+
+    const mockModule = {
+      GenerativeModel: {
+        prototype: {
+          countTokens: originalCount,
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+
+  it("should not double-patch module", () => {
+    const inst = new VertexAIInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const mockModule = {
+      _fiPatched: true,
+      GenerativeModel: {
+        prototype: {
+          generateContent: jest.fn(),
+        },
+      },
+    };
+
+    const original = mockModule.GenerativeModel.prototype.generateContent;
+    inst.manuallyInstrument(mockModule);
+
+    // Should not have changed
+    expect(mockModule.GenerativeModel.prototype.generateContent).toBe(original);
+  });
+});
+
+describe("ChatSession Patching", () => {
+  const memoryExporter = new InMemorySpanExporter();
+  const tracerProvider = new NodeTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(memoryExporter)]
+  });
+  tracerProvider.register();
+
+  beforeEach(() => {
+    memoryExporter.reset();
+    _resetPatchedStateForTesting();
+  });
+
+  it("should wrap ChatSession.sendMessage when available", () => {
+    const inst = new VertexAIInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const originalSend = jest.fn().mockResolvedValue({
+      response: {
+        candidates: [{ content: { role: "model", parts: [{ text: "Response" }] } }],
+      },
+    });
+
+    const mockModule = {
+      ChatSession: {
+        prototype: {
+          sendMessage: originalSend,
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+
+  it("should wrap ChatSession.sendMessageStream when available", () => {
+    const inst = new VertexAIInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const originalStream = jest.fn().mockResolvedValue({
+      stream: (async function* () {
+        yield { candidates: [{ content: { parts: [{ text: "Streaming" }] } }] };
+      })(),
+    });
+
+    const mockModule = {
+      ChatSession: {
+        prototype: {
+          sendMessageStream: originalStream,
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+});
+
+describe("TextEmbeddingModel Patching", () => {
+  const memoryExporter = new InMemorySpanExporter();
+  const tracerProvider = new NodeTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(memoryExporter)]
+  });
+  tracerProvider.register();
+
+  beforeEach(() => {
+    memoryExporter.reset();
+    _resetPatchedStateForTesting();
+  });
+
+  it("should wrap TextEmbeddingModel.embed when available", () => {
+    const inst = new VertexAIInstrumentation();
+    inst.setTracerProvider(tracerProvider);
+    inst.enable();
+
+    const originalEmbed = jest.fn().mockResolvedValue({
+      embeddings: [{ values: [0.1, 0.2, 0.3] }],
+    });
+
+    const mockModule = {
+      TextEmbeddingModel: {
+        prototype: {
+          embed: originalEmbed,
+        },
+      },
+    };
+
+    inst.manuallyInstrument(mockModule);
+    expect((mockModule as any)._fiPatched).toBe(true);
+  });
+});
