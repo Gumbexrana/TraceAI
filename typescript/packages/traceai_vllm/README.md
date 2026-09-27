@@ -56,3 +56,92 @@ const response = await client.chat.completions.create({
   model: "meta-llama/Llama-2-7b-chat-hf",
   messages: [
     { role: "system", content: "You are a helpful assistant." },
+    { role: "user", content: "Hello!" },
+  ],
+});
+```
+
+### URL Pattern Matching
+
+When running multiple OpenAI-compatible APIs, use `baseUrlPattern` to only trace vLLM requests:
+
+```typescript
+// String pattern
+const instrumentation = new VLLMInstrumentation({
+  baseUrlPattern: "localhost:8000",
+});
+
+// RegExp pattern for multiple servers
+const instrumentation = new VLLMInstrumentation({
+  baseUrlPattern: /vllm\.internal:\d+/,
+});
+```
+
+### Streaming Responses
+
+```typescript
+const stream = await client.chat.completions.create({
+  model: "meta-llama/Llama-2-7b-chat-hf",
+  messages: [{ role: "user", content: "Count to 5." }],
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content || "");
+}
+```
+
+### Text Completions
+
+```typescript
+const completion = await client.completions.create({
+  model: "meta-llama/Llama-2-7b-hf",
+  prompt: "The quick brown fox",
+  max_tokens: 50,
+});
+```
+
+## Configuration Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `instrumentationConfig` | `InstrumentationConfig` | OpenTelemetry instrumentation config |
+| `traceConfig` | `TraceConfigOptions` | TraceAI config (hideInputs, hideOutputs, etc.) |
+| `baseUrlPattern` | `string \| RegExp` | URL pattern to identify vLLM requests |
+
+## Captured Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `fi.span.kind` | Always "LLM" |
+| `llm.system` | "vllm" |
+| `llm.provider` | "vllm" |
+| `llm.model` | Model name |
+| `llm.token_count.prompt` | Input token count |
+| `llm.token_count.completion` | Output token count |
+| `llm.token_count.total` | Total token count |
+| `llm.input_messages.{n}.role` | Message role |
+| `llm.input_messages.{n}.content` | Message content |
+| `llm.output_messages.{n}.role` | Response role |
+| `llm.output_messages.{n}.content` | Response content |
+
+## Running vLLM Server
+
+```bash
+# Using Docker
+docker run --runtime nvidia --gpus all \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  -p 8000:8000 \
+  vllm/vllm-openai:latest \
+  --model meta-llama/Llama-2-7b-chat-hf
+
+# Or using Python
+pip install vllm
+python -m vllm.entrypoints.openai.api_server \
+  --model meta-llama/Llama-2-7b-chat-hf \
+  --port 8000
+```
+
+## License
+
+Apache-2.0
