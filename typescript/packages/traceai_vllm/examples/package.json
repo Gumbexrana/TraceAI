@@ -1,0 +1,8 @@
+{
+  "name": "@traceai/vllm-examples",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Examples for @traceai/vllm",
+  "scripts": {
+    "example": "ts-node example.ts"
+  },
