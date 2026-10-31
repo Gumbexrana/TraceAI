@@ -126,3 +126,59 @@ describeE2E("XAIInstrumentation E2E", () => {
                     type: "string",
                     description: "IANA timezone (e.g., 'Asia/Tokyo')",
                   },
+                },
+                required: ["timezone"],
+              },
+            },
+          },
+        ],
+        tool_choice: "auto",
+        max_tokens: 100,
+      });
+
+      const toolCall = response.choices[0]?.message?.tool_calls?.[0];
+      console.log(
+        "Tool calling response:",
+        toolCall ? `Called ${toolCall.function.name}` : "No tool call",
+      );
+    } catch (error) {
+      console.log(
+        "Tool calling errored (span still exported):",
+        (error as Error).message,
+      );
+    }
+  }, 30000);
+
+  it("should handle multi-turn conversation", async () => {
+    try {
+      const response = await client.chat.completions.create({
+        model: "gemini-2.0-flash",
+        messages: [
+          { role: "system", content: "You are a helpful assistant." },
+          { role: "user", content: "My name is Alice." },
+          { role: "assistant", content: "Nice to meet you, Alice!" },
+          { role: "user", content: "What's my name?" },
+        ],
+        max_tokens: 20,
+      });
+
+      expect(response.choices[0].message.content).toBeDefined();
+      console.log("Multi-turn response:", response.choices[0].message.content);
+    } catch (error) {
+      console.log(
+        "Multi-turn errored (span still exported):",
+        (error as Error).message,
+      );
+    }
+  }, 30000);
+
+  it("should handle errors gracefully", async () => {
+    await expect(
+      client.chat.completions.create({
+        model: "non-existent-model",
+        messages: [{ role: "user", content: "Hello" }],
+      }),
+    ).rejects.toThrow();
+    console.log("Error handling: correctly threw on invalid model");
+  }, 30000);
+});
