@@ -28,7 +28,7 @@ jobs:
       FI_BASE_URL: http://127.0.0.1:9
       FI_GRPC_URL: http://127.0.0.1:9
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
