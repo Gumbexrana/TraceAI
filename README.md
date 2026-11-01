@@ -1,3 +1,4 @@
+<p align="center"><img alt="Python" src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white"> <img alt="OpenTelemetry" src="https://img.shields.io/badge/OpenTelemetry-native-4B0082?style=flat-square"> <img alt="Tests" src="https://img.shields.io/badge/Tests-CI-0e8a16?style=flat-square"></p>
 <p align="center">
   <a href="https://github.com/Gumbexrana/TraceAI#readme"><img alt="Docs" src="https://img.shields.io/badge/Docs-Read%20the%20guide-2f81f7?style=for-the-badge&logo=readthedocs&logoColor=white"></a>
   <a href="https://github.com/Gumbexrana/TraceAI/issues"><img alt="Issues" src="https://img.shields.io/badge/Issues-Open%20a%20report-0e8a16?style=for-the-badge&logo=github&logoColor=white"></a>
