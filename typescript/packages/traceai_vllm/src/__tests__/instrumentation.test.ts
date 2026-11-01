@@ -385,3 +385,170 @@ describe("VLLMInstrumentation", () => {
 
       const spans = memoryExporter.getFinishedSpans();
       const span = spans[0];
+
+      expect(span.attributes[SemanticConventions.FI_SPAN_KIND]).toBe(FISpanKind.LLM);
+      expect(span.attributes[SemanticConventions.LLM_MODEL_NAME]).toBe("meta-llama/Llama-2-7b-hf");
+      expect(span.attributes[SemanticConventions.LLM_PROVIDER]).toBe(LLMProvider.VLLM);
+      expect(span.attributes[`${SemanticConventions.LLM_PROMPTS}.0`]).toBe("The quick brown fox");
+    });
+
+    it("should capture output text", async () => {
+      const body = {
+        model: "meta-llama/Llama-2-7b-hf",
+        prompt: "The quick brown fox",
+      };
+
+      await patchedFn(body);
+
+      const spans = memoryExporter.getFinishedSpans();
+      const span = spans[0];
+
+      expect(span.attributes[SemanticConventions.OUTPUT_VALUE]).toBe(" jumped over the lazy dog.");
+      expect(span.attributes[SemanticConventions.OUTPUT_MIME_TYPE]).toBe(MimeType.TEXT);
+    });
+
+    it("should handle errors gracefully", async () => {
+      const error = new Error("Completion error");
+      mockOriginal.mockRejectedValueOnce(error);
+
+      const body = {
+        model: "meta-llama/Llama-2-7b-hf",
+        prompt: "Hello",
+      };
+
+      await expect(patchedFn(body)).rejects.toThrow("Completion error");
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans.length).toBe(1);
+      expect(spans[0].status.code).toBe(2);
+    });
+  });
+
+  describe("streaming response handling", () => {
+    let mockOriginal: jest.Mock;
+    let patchedFn: (body: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown>;
+
+    beforeEach(() => {
+      const wrapperFactory = (instrumentation as unknown as {
+        createChatCompletionWrapper: (inst: VLLMInstrumentation) => (original: jest.Mock) => typeof patchedFn;
+      }).createChatCompletionWrapper(instrumentation);
+
+      mockOriginal = jest.fn();
+      patchedFn = wrapperFactory(mockOriginal);
+    });
+
+    it("should handle streaming responses", async () => {
+      const chunks = [
+        {
+          id: "chatcmpl-123",
+          object: "chat.completion.chunk",
+          created: 1677652288,
+          model: "meta-llama/Llama-2-7b-chat-hf",
+          choices: [{ index: 0, delta: { content: "Hello" }, finish_reason: null }],
+        },
+        {
+          id: "chatcmpl-123",
+          object: "chat.completion.chunk",
+          created: 1677652288,
+          model: "meta-llama/Llama-2-7b-chat-hf",
+          choices: [{ index: 0, delta: { content: " world" }, finish_reason: null }],
+        },
+        {
+          id: "chatcmpl-123",
+          object: "chat.completion.chunk",
+          created: 1677652288,
+          model: "meta-llama/Llama-2-7b-chat-hf",
+          choices: [{ index: 0, delta: { content: "!" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+        },
+      ];
+
+      async function* mockStream() {
+        for (const chunk of chunks) {
+          yield chunk;
+        }
+      }
+
+      mockOriginal.mockResolvedValueOnce(mockStream());
+
+      const body = {
+        model: "meta-llama/Llama-2-7b-chat-hf",
+        messages: [{ role: "user", content: "Hello!" }],
+        stream: true,
+      };
+
+      const result = await patchedFn(body);
+      const collectedChunks: unknown[] = [];
+
+      for await (const chunk of result as AsyncIterable<unknown>) {
+        collectedChunks.push(chunk);
+      }
+
+      expect(collectedChunks.length).toBe(3);
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans.length).toBe(1);
+
+      const span = spans[0];
+      expect(span.attributes[SemanticConventions.OUTPUT_VALUE]).toBe("Hello world!");
+    });
+
+    it("should handle stream errors", async () => {
+      async function* mockErrorStream() {
+        yield {
+          id: "chatcmpl-123",
+          choices: [{ index: 0, delta: { content: "Hello" } }],
+        };
+        throw new Error("Stream error");
+      }
+
+      mockOriginal.mockResolvedValueOnce(mockErrorStream());
+
+      const body = {
+        model: "meta-llama/Llama-2-7b-chat-hf",
+        messages: [{ role: "user", content: "Hello!" }],
+        stream: true,
+      };
+
+      const result = await patchedFn(body);
+
+      const consumeStream = async () => {
+        for await (const _chunk of result as AsyncIterable<unknown>) {
+          // consume
+        }
+      };
+
+      await expect(consumeStream()).rejects.toThrow("Stream error");
+
+      const spans = memoryExporter.getFinishedSpans();
+      expect(spans.length).toBe(1);
+      expect(spans[0].status.code).toBe(2);
+    });
+  });
+
+  describe("baseUrlPattern filtering", () => {
+    it("should trace all requests when no pattern is set", async () => {
+      const inst = new VLLMInstrumentation();
+      const isVLLMRequest = (inst as unknown as { isVLLMRequest: (client: unknown) => boolean }).isVLLMRequest;
+
+      expect(isVLLMRequest.call(inst, { baseURL: "http://example.com" })).toBe(true);
+    });
+
+    it("should filter by string pattern", async () => {
+      const inst = new VLLMInstrumentation({ baseUrlPattern: "localhost:8000" });
+      const isVLLMRequest = (inst as unknown as { isVLLMRequest: (client: unknown) => boolean }).isVLLMRequest;
+
+      expect(isVLLMRequest.call(inst, { baseURL: "http://localhost:8000/v1" })).toBe(true);
+      expect(isVLLMRequest.call(inst, { baseURL: "http://api.openai.com/v1" })).toBe(false);
+    });
+
+    it("should filter by RegExp pattern", async () => {
+      const inst = new VLLMInstrumentation({ baseUrlPattern: /localhost:\d+/ });
+      const isVLLMRequest = (inst as unknown as { isVLLMRequest: (client: unknown) => boolean }).isVLLMRequest;
+
+      expect(isVLLMRequest.call(inst, { baseURL: "http://localhost:8000/v1" })).toBe(true);
+      expect(isVLLMRequest.call(inst, { baseURL: "http://localhost:8001/v1" })).toBe(true);
+      expect(isVLLMRequest.call(inst, { baseURL: "http://api.openai.com/v1" })).toBe(false);
+    });
+  });
+});
