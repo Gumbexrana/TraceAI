@@ -64,7 +64,7 @@ jobs:
           PY
           /tmp/livekit-wheel-smoke/bin/pip check
       - name: Upload distributions and test results for review (no publishing)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: traceai-livekit-python-${{ matrix.python }}
           path: |
