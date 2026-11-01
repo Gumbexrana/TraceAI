@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/Gumbexrana/TraceAI#readme"><img alt="Docs" src="https://img.shields.io/badge/Docs-Read%20the%20guide-2f81f7?style=for-the-badge&logo=readthedocs&logoColor=white"></a>
+  <a href="https://github.com/Gumbexrana/TraceAI/issues"><img alt="Issues" src="https://img.shields.io/badge/Issues-Open%20a%20report-0e8a16?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="https://github.com/Gumbexrana/TraceAI/releases"><img alt="Releases" src="https://img.shields.io/badge/Releases-Latest-6f42c1?style=for-the-badge&logo=github&logoColor=white"></a>
+</p>
+
 <div align="center">
 
 ![traceAI Logo](Logo.png)
