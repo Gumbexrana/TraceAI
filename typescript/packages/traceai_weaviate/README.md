@@ -205,3 +205,93 @@ async function findDuplicates(documentVector: number[], threshold = 0.95) {
 ```typescript
 async function searchKnowledgeBase(
   tenantId: string,
+  query: string,
+  options?: SearchOptions
+) {
+  const knowledge = client.collections.get("KnowledgeBase");
+
+  // BM25 search with tenant isolation
+  const results = await knowledge.query.bm25(query, {
+    limit: options?.limit ?? 10,
+    returnProperties: ["title", "content", "tags", "updatedAt"],
+    where: {
+      path: ["tenantId"],
+      operator: "Equal",
+      valueText: tenantId,
+    },
+  });
+
+  return results;
+}
+```
+
+### 5. Real-time Content Recommendation
+
+```typescript
+async function getRecommendations(userId: string, limit = 10) {
+  const users = client.collections.get("Users");
+  const content = client.collections.get("Content");
+
+  // Get user's preference vector
+  const user = await users.query.fetchObjectById(userId, {
+    returnProperties: ["preferenceVector"],
+  });
+
+  if (!user?.properties.preferenceVector) {
+    return [];
+  }
+
+  // Find similar content
+  const recommendations = await content.query.nearVector(
+    user.properties.preferenceVector as number[],
+    {
+      limit,
+      returnProperties: ["title", "type", "thumbnailUrl", "duration"],
+      where: {
+        path: ["status"],
+        operator: "Equal",
+        valueText: "published",
+      },
+    }
+  );
+
+  return recommendations.objects;
+}
+```
+
+## Integration with OpenTelemetry
+
+```typescript
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { WeaviateInstrumentation } from "@traceai/weaviate";
+
+const sdk = new NodeSDK({
+  traceExporter: new OTLPTraceExporter({
+    url: "http://localhost:4318/v1/traces",
+  }),
+  instrumentations: [new WeaviateInstrumentation()],
+});
+
+sdk.start();
+```
+
+## Error Handling
+
+The instrumentation automatically captures errors and exceptions:
+
+```typescript
+try {
+  await collection.query.nearText("search query", { limit: 10 });
+} catch (error) {
+  // Error is automatically recorded in the span with:
+  // - exception.type
+  // - exception.message
+  // - exception.stacktrace
+  // - span status set to ERROR
+}
+```
+
+## License
+
+Apache-2.0
