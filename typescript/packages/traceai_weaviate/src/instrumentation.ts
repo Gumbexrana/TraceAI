@@ -169,3 +169,261 @@ export class WeaviateInstrumentation extends InstrumentationBase {
       };
     }
 
+    // Patch bm25 search
+    if (prototype.query?.bm25) {
+      const original = prototype.query.bm25;
+      prototype.query.bm25 = function (...args: any[]) {
+        return instrumentation._wrapCollectionMethod(
+          this,
+          original,
+          "bm25",
+          args
+        );
+      };
+    }
+
+    // Patch fetchObjects
+    if (prototype.query?.fetchObjects) {
+      const original = prototype.query.fetchObjects;
+      prototype.query.fetchObjects = function (...args: any[]) {
+        return instrumentation._wrapCollectionMethod(
+          this,
+          original,
+          "fetchObjects",
+          args
+        );
+      };
+    }
+
+    // Patch data.insert
+    if (prototype.data?.insert) {
+      const original = prototype.data.insert;
+      prototype.data.insert = function (...args: any[]) {
+        return instrumentation._wrapCollectionMethod(
+          this,
+          original,
+          "insert",
+          args
+        );
+      };
+    }
+
+    // Patch data.insertMany
+    if (prototype.data?.insertMany) {
+      const original = prototype.data.insertMany;
+      prototype.data.insertMany = function (...args: any[]) {
+        return instrumentation._wrapCollectionMethod(
+          this,
+          original,
+          "insertMany",
+          args
+        );
+      };
+    }
+
+    // Patch data.deleteById
+    if (prototype.data?.deleteById) {
+      const original = prototype.data.deleteById;
+      prototype.data.deleteById = function (...args: any[]) {
+        return instrumentation._wrapCollectionMethod(
+          this,
+          original,
+          "deleteById",
+          args
+        );
+      };
+    }
+
+    // Patch data.deleteMany
+    if (prototype.data?.deleteMany) {
+      const original = prototype.data.deleteMany;
+      prototype.data.deleteMany = function (...args: any[]) {
+        return instrumentation._wrapCollectionMethod(
+          this,
+          original,
+          "deleteMany",
+          args
+        );
+      };
+    }
+
+    // Patch aggregate
+    if (prototype.aggregate) {
+      const original = prototype.aggregate;
+      prototype.aggregate = function (...args: any[]) {
+        return instrumentation._wrapCollectionMethod(
+          this,
+          original,
+          "aggregate",
+          args
+        );
+      };
+    }
+  }
+
+  private getCommonAttributes(operation: WeaviateOperation, collectionName: string): Attributes {
+    return {
+      "db.system": "weaviate",
+      "db.operation.name": operation,
+      "db.collection.name": collectionName,
+      [SemanticConventions.FI_SPAN_KIND]: "VECTOR_DB",
+    };
+  }
+
+  private _setOperationAttributes(
+    attributes: Attributes,
+    operation: WeaviateOperation,
+    args: any[]
+  ): void {
+    const params = args[0] || {};
+
+    switch (operation) {
+      case "nearVector":
+        if (params.vector && !this._weaviateConfig.captureQueryVectors) {
+          attributes["db.vector.query.dimensions"] = params.vector.length;
+        }
+        if (params.limit) {
+          attributes["db.vector.query.top_k"] = params.limit;
+        }
+        if (params.certainty) {
+          attributes["db.vector.query.certainty"] = params.certainty;
+        }
+        if (params.distance) {
+          attributes["db.vector.query.distance"] = params.distance;
+        }
+        break;
+
+      case "nearText":
+        if (params.query) {
+          attributes["db.vector.query.text"] = params.query;
+        }
+        if (params.limit) {
+          attributes["db.vector.query.top_k"] = params.limit;
+        }
+        break;
+
+      case "hybrid":
+        if (params.query) {
+          attributes["db.vector.query.text"] = params.query;
+        }
+        if (params.alpha !== undefined) {
+          attributes["db.vector.query.alpha"] = params.alpha;
+        }
+        if (params.limit) {
+          attributes["db.vector.query.top_k"] = params.limit;
+        }
+        break;
+
+      case "bm25":
+        if (params.query) {
+          attributes["db.vector.query.text"] = params.query;
+        }
+        if (params.limit) {
+          attributes["db.vector.query.top_k"] = params.limit;
+        }
+        break;
+
+      case "fetchObjects":
+        if (params.limit) {
+          attributes["db.vector.query.top_k"] = params.limit;
+        }
+        if (params.offset) {
+          attributes["db.vector.query.offset"] = params.offset;
+        }
+        break;
+
+      case "insert":
+        attributes["db.operation.batch_size"] = 1;
+        break;
+
+      case "insertMany":
+        if (Array.isArray(params)) {
+          attributes["db.operation.batch_size"] = params.length;
+        } else if (params.objects) {
+          attributes["db.operation.batch_size"] = params.objects.length;
+        }
+        break;
+
+      case "deleteById":
+        attributes["db.operation.batch_size"] = 1;
+        break;
+
+      case "deleteMany":
+        if (params.where) {
+          attributes["db.operation.has_filter"] = true;
+        }
+        break;
+
+      case "aggregate":
+        // Aggregate-specific attributes
+        break;
+    }
+  }
+
+  private _setResultAttributes(
+    span: any,
+    operation: WeaviateOperation,
+    result: any
+  ): void {
+    if (!result) return;
+
+    switch (operation) {
+      case "nearVector":
+      case "nearText":
+      case "hybrid":
+      case "bm25":
+      case "fetchObjects":
+        if (result.objects) {
+          span.setAttribute("db.response.returned_rows", result.objects.length);
+        } else if (Array.isArray(result)) {
+          span.setAttribute("db.response.returned_rows", result.length);
+        }
+        break;
+
+      case "insertMany":
+        if (result.uuids) {
+          span.setAttribute("db.response.inserted_count", result.uuids.length);
+        }
+        break;
+    }
+  }
+
+  private async _wrapCollectionMethod(
+    thisArg: any,
+    original: Function,
+    operation: WeaviateOperation,
+    args: any[]
+  ): Promise<any> {
+    const collectionName = thisArg?.name || "unknown";
+    const attributes = this.getCommonAttributes(operation, collectionName);
+    this._setOperationAttributes(attributes, operation, args);
+
+    const span = this.fiTracer.startSpan(`weaviate ${operation}`, {
+      kind: SpanKind.CLIENT,
+      attributes,
+    });
+
+    try {
+      const result = await context.with(
+        trace.setSpan(context.active(), span),
+        () => original.apply(thisArg, args)
+      );
+
+      this._setResultAttributes(span, operation, result);
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.recordException(error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: error?.message || "Weaviate operation failed",
+      });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+}
+
+export default WeaviateInstrumentation;
